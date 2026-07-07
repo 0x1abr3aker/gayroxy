@@ -31,12 +31,12 @@ jobs:
           NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: ./proxy.sh
 
-      - name: Re‑trigger this workflow
-        # Always run this step, even if the script failed
-        if: always()
-        run: |
-          echo "Proxy run finished with exit code ${{ steps.proxy.outcome }}"
-          echo "🔄 Triggering a new run of this workflow..."
-          gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}"
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      # - name: Re‑trigger this workflow
+      #   # Always run this step, even if the script failed
+      #   if: always()
+      #   run: |
+      #     echo "Proxy run finished with exit code ${{ steps.proxy.outcome }}"
+      #     echo "🔄 Triggering a new run of this workflow..."
+      #     gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}"
+      #   env:
+      #     GH_TOKEN: ${{ secrets.GH_TOKEN }}
