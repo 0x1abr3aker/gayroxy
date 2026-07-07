@@ -28,6 +28,7 @@ jobs:
         id: proxy
         continue-on-error: true   # don't fail the job even if script exits with error
         env:
+          NGROK_DOMAIN: ${{ secrets.NGROK_DOMAIN }}
           NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: ./proxy.sh
 
