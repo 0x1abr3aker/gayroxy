@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# set -euo pipefail
+set -euo pipefail
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 XRAY_DIR="${PWD}"
 CONFIG_FILE="${XRAY_DIR}/config.json"
 XRAY_BIN="${XRAY_DIR}/xray"
-NGROK_BIN="${NGROK_DIR:-${XRAY_DIR}}/ngrok"
+NGROK_BIN="${XRAY_DIR}/ngrok"
 NGINX_CONF="${XRAY_DIR}/nginx.conf"
 SUB_DIR="${XRAY_DIR}/sub"
 NGROK_API="http://127.0.0.1:4040/api/tunnels"
@@ -88,25 +88,66 @@ if ! command -v nginx &>/dev/null; then
     fi
 fi
 
-# ─── Install ngrok if not present ─────────────────────────────────────────——
-NGROK_SYSTEM=$(which ngrok 2>/dev/null || true)
+# ─── Install ngrok ─────────────────────────────────────────────────—————
+NGROK_SYSTEM=""
+if command -v ngrok &>/dev/null; then
+    NGROK_SYSTEM=$(command -v ngrok)
+fi
+
 if [[ -n "${NGROK_SYSTEM}" && -x "${NGROK_SYSTEM}" ]]; then
     NGROK_BIN="${NGROK_SYSTEM}"
     log "Using system ngrok: ${NGROK_BIN}"
-elif [[ ! -x "$NGROK_BIN" ]]; then
-    log "Downloading ngrok..."
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64)  NGROK_ARCH="linux-amd64" ;;
-        aarch64) NGROK_ARCH="linux-arm64" ;;
-        armv7l)  NGROK_ARCH="linux-arm" ;;
-        *)       error "Unsupported arch: $ARCH"; exit 1 ;;
-    esac
-    curl -L --progress-bar -o ngrok.tgz "https://bin.equinox.io/c/bNyjFmdUd9w/ngrok-v3-stable-${NGROK_ARCH}.tgz"
-    tar -xzf ngrok.tgz ngrok
-    chmod +x ngrok
-    rm -f ngrok.tgz
-    log "ngrok installed locally."
+else
+    log "Installing ngrok..."
+
+    # Prefer apt repo (most reliable)
+    if command -v apt-get &>/dev/null; then
+        log "Attempting apt install..."
+        curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+        echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list >/dev/null
+        sudo apt-get update -qq && sudo apt-get install -y -qq ngrok 2>/dev/null && {
+            NGROK_BIN=$(command -v ngrok)
+            log "ngrok installed via apt."
+        } || warn "apt install failed, falling back to download..."
+    fi
+
+    # Manual download
+    if ! command -v ngrok &>/dev/null; then
+        ARCH=$(uname -m)
+        case "$ARCH" in
+            x86_64)  NGROK_ARCH="linux-amd64" ;;
+            aarch64) NGROK_ARCH="linux-arm64" ;;
+            armv7l)  NGROK_ARCH="linux-arm" ;;
+            *)       error "Unsupported arch: $ARCH"; exit 1 ;;
+        esac
+
+        NGROK_URL="https://ngrok-agent.s3.amazonaws.com/ngrok-v3-stable-${NGROK_ARCH}.tgz"
+        log "Downloading ngrok..."
+
+        # Download with proper error handling
+        HTTP_CODE=$(curl -fL -w "%{http_code}" --progress-bar -o ngrok.tgz "$NGROK_URL")
+        if [[ $? -ne 0 || "$HTTP_CODE" != "200" ]]; then
+            error "Download failed (HTTP $HTTP_CODE). Trying fallback..."
+            curl -fL -o ngrok.tgz "https://bin.equinox.io/c/bNyjFmdUd9w/ngrok-v3-stable-${NGROK_ARCH}.tgz" || {
+                error "All ngrok download sources failed."
+                exit 1
+            }
+        fi
+
+        # Verify it's valid archive
+        if ! file ngrok.tgz 2>/dev/null | grep -q "gzip"; then
+            error "Downloaded file is not a valid gzip archive. Contents:"
+            head -c 500 ngrok.tgz || true
+            rm -f ngrok.tgz
+            exit 1
+        fi
+
+        tar -xzf ngrok.tgz ngrok
+        chmod +x ngrok
+        rm -f ngrok.tgz
+        NGROK_BIN="${PWD}/ngrok"
+        log "ngrok downloaded and extracted."
+    fi
 fi
 
 [[ -z "${NGROK_AUTHTOKEN:-}" ]] && { error "Set NGROK_AUTHTOKEN"; exit 1; }
@@ -282,13 +323,23 @@ log "nginx running on port ${PORT_NGINX}"
 
 # ─── Start ngrok ─────────────────────────────────────────────────—————
 log "Starting ngrok tunnel to nginx on port ${PORT_NGINX}..."
-$NGROK_BIN http --domain="${NGROK_DOMAIN}" ${PORT_NGINX} --authtoken "${NGROK_AUTHTOKEN}" > /dev/null 2>&1 &
+NGROK_LOG="${XRAY_DIR}/logs/ngrok.log"
+mkdir -p "${XRAY_DIR}/logs"
+
+$NGROK_BIN http --authtoken "${NGROK_AUTHTOKEN}" --domain="${NGROK_DOMAIN}" ${PORT_NGINX} >"${NGROK_LOG}" 2>&1 &
 NGROK_PID=$!
 
 MAX_RETRIES=30
 NGROK_URL=""
 for ((i=1; i<=MAX_RETRIES; i++)); do
     sleep 2
+    # Check if ngrok process died
+    if ! kill -0 $NGROK_PID 2>/dev/null; then
+        error "ngrok process exited unexpectedly. Last log lines:"
+        tail -n 20 "${NGROK_LOG}" 2>/dev/null || true
+        exit 1
+    fi
+
     DATA=$(curl -s "$NGROK_API" 2>/dev/null || true)
     if [[ -n "$DATA" ]]; then
         NGROK_URL=$(echo "$DATA" | grep -o '"public_url":"https://[^"]*"' | head -1 | sed 's/.*"public_url":"\([^"]*\)".*/\1/')
@@ -297,7 +348,11 @@ for ((i=1; i<=MAX_RETRIES; i++)); do
 done
 
 if [[ -z "$NGROK_URL" ]]; then
-    error "ngrok failed to establish tunnel. Check NGROK_AUTHTOKEN and NGROK_DOMAIN."
+    error "ngrok failed to establish tunnel."
+    if [[ -f "${NGROK_LOG}" ]]; then
+        error "ngrok logs:"
+        cat "${NGROK_LOG}" | tail -n 20
+    fi
     kill $NGROK_PID 2>/dev/null || true
     exit 1
 fi
