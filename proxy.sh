@@ -16,6 +16,12 @@ PORT_NGINX=9000
 PORT_VLESS=10001
 PORT_TROJAN=10002
 PORT_VMESS=10003
+PORT_VLESS_GRPC=10005
+PORT_TROJAN_GRPC=10006
+PORT_SHADOWSOCKS=10007
+PORT_REALITY=10008
+PORT_SOCKS5=10009
+PORT_HTTP_PROXY=10010
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -100,12 +106,24 @@ log "Generating credentials..."
 UUID_VLESS=$(cat /proc/sys/kernel/random/uuid)
 UUID_TROJAN=$(cat /proc/sys/kernel/random/uuid)
 UUID_VMESS=$(cat /proc/sys/kernel/random/uuid)
+UUID_VLESS_GRPC=$(cat /proc/sys/kernel/random/uuid)
+UUID_TROJAN_GRPC=$(cat /proc/sys/kernel/random/uuid)
+UUID_SHADOWSOCKS=$(cat /proc/sys/kernel/random/uuid)
+UUID_REALITY=$(cat /proc/sys/kernel/random/uuid)
 TROJAN_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
+SS_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
+REALITY_PRIVATE=$("$XRAY_BIN" x25519 2>/dev/null | grep 'Private' | awk '{print $3}' || cat /proc/sys/kernel/random/uuid)
+REALITY_PUBLIC=$("$XRAY_BIN" x25519 2>/dev/null | grep 'Public' | awk '{print $3}' || cat /proc/sys/kernel/random/uuid)
+if [[ -z "$REALITY_PRIVATE" ]]; then REALITY_PRIVATE=$(cat /proc/sys/kernel/random/uuid); REALITY_PUBLIC=$(cat /proc/sys/kernel/random/uuid); fi
 
 # Unique random paths (like the working single-config)
 PATH_VLESS="/$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
 PATH_TROJAN="/$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
 PATH_VMESS="/$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
+PATH_VLESS_GRPC="/vless-grpc-$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
+PATH_TROJAN_GRPC="/trojan-grpc-$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
+GRPC_SERVICE_VLESS="$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
+GRPC_SERVICE_TROJAN="$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
 
 # ─── Write xray config ─────────────────────────────────────────────────────
 log "Writing Xray config..."
@@ -150,6 +168,70 @@ cat > "$CONFIG_FILE" <<JSON
         "security": "none",
         "wsSettings": {"path": "${PATH_VMESS}"}
       }
+    },
+    {
+      "tag": "vless-grpc",
+      "listen": "127.0.0.1",
+      "port": ${PORT_VLESS_GRPC},
+      "protocol": "vless",
+      "settings": {"clients": [{"id": "${UUID_VLESS_GRPC}", "decryption": "none"}]},
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "grpcSettings": {"serviceName": "${GRPC_SERVICE_VLESS}"}
+      }
+    },
+    {
+      "tag": "trojan-grpc",
+      "listen": "127.0.0.1",
+      "port": ${PORT_TROJAN_GRPC},
+      "protocol": "trojan",
+      "settings": {"clients": [{"password": "${TROJAN_PASS}"}]},
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "grpcSettings": {"serviceName": "${GRPC_SERVICE_TROJAN}"}
+      }
+    },
+    {
+      "tag": "shadowsocks",
+      "listen": "127.0.0.1",
+      "port": ${PORT_SHADOWSOCKS},
+      "protocol": "shadowsocks",
+      "settings": {"method": "aes-256-gcm", "password": "${SS_PASS}"}
+    },
+    {
+      "tag": "reality",
+      "listen": "127.0.0.1",
+      "port": ${PORT_REALITY},
+      "protocol": "vless",
+      "settings": {"clients": [{"id": "${UUID_REALITY}"}]},
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "www.cloudflare.com:443",
+          "serverNames": ["www.cloudflare.com"],
+          "privateKey": "${REALITY_PRIVATE}",
+          "publicKey": "${REALITY_PUBLIC}",
+          "shortIds": ["$(openssl rand -hex 4)"]
+        }
+      }
+    },
+    {
+      "tag": "socks5",
+      "listen": "127.0.0.1",
+      "port": ${PORT_SOCKS5},
+      "protocol": "socks",
+      "settings": {"auth": "noauth"}
+    },
+    {
+      "tag": "http-proxy",
+      "listen": "127.0.0.1",
+      "port": ${PORT_HTTP_PROXY},
+      "protocol": "http",
+      "settings": {}
     }
   ],
   "outbounds": [
@@ -210,6 +292,27 @@ http {
             proxy_set_header Connection \$connection_upgrade;
             proxy_read_timeout 86400;
             proxy_connect_timeout 86400;
+        }
+
+        location ${PATH_VLESS_GRPC} {
+            proxy_pass http://127.0.0.1:${PORT_VLESS_GRPC};
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            grpc_pass http://127.0.0.1:${PORT_VLESS_GRPC};
+        }
+
+        location ${PATH_TROJAN_GRPC} {
+            proxy_pass http://127.0.0.1:${PORT_TROJAN_GRPC};
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            grpc_pass http://127.0.0.1:${PORT_TROJAN_GRPC};
+        }
+
+        location /panel {
+            root ${SUB_DIR};
+            try_files \$uri /panel.html;
         }
 
         location / {
@@ -294,13 +397,32 @@ TROJAN_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome
 VMESS_JSON="{\"v\":\"2\",\"ps\":\"ngrok-vmess-ws\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${PATH_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
 VMESS_URL="vmess://$(echo -n "$VMESS_JSON" | base64 -w 0)"
 
+# ─── URLs for new protocols ─────────────────────────────────────────────——
+VLESS_GRPC_URL="vless://${UUID_VLESS_GRPC}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_VLESS}&sni=${DOMAIN}&encryption=none#ngrok-vless-grpc"
+
+TROJAN_GRPC_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_TROJAN}&sni=${DOMAIN}#ngrok-trojan-grpc"
+
+SS_BASE="$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)"
+SS_URL="ss://${SS_BASE}@127.0.0.1:${PORT_SHADOWSOCKS}#shadowsocks-local"
+
+REALITY_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=$(echo -n "${REALITY_PRIVATE}" | base64 -w 0 | head -c 8)&type=tcp&sni=www.cloudflare.com#ngrok-reality-local"
+
+SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#socks5-local"
+HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#http-proxy-local"
+
 SUB_CONTENT="${VLESS_URL}
 ${TROJAN_URL}
-${VMESS_URL}"
+${VMESS_URL}
+${VLESS_GRPC_URL}
+${TROJAN_GRPC_URL}
+${SS_URL}
+${REALITY_URL}
+${SOCKS5_URL}
+${HTTP_URL}"
 
 echo -n "$SUB_CONTENT" | base64 -w 0 > "${SUB_DIR}/subscription.b64"
 
-# ─── HTML landing page ──────────────────────────────────────────────────────
+# ─── HTML landing page & panel ───────────────────────────────────────────—
 cat > "${SUB_DIR}/index.html" <<HTML
 <!DOCTYPE html>
 <html><head><title>Proxy Subscription</title></head>
@@ -311,6 +433,12 @@ cat > "${SUB_DIR}/index.html" <<HTML
 <li>VLESS + WebSocket + TLS</li>
 <li>Trojan + WebSocket + TLS</li>
 <li>VMess + WebSocket + TLS</li>
+<li>VLESS + gRPC + TLS</li>
+<li>Trojan + gRPC + TLS</li>
+<li>Shadowsocks (local)</li>
+<li>Reality (local)</li>
+<li>Socks5 (local)</li>
+<li>HTTP Proxy (local)</li>
 </ul>
 </body></html>
 HTML
