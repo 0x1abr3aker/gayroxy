@@ -83,10 +83,25 @@ if [[ -n "${NGROK_SYSTEM}" && -x "${NGROK_SYSTEM}" ]]; then
     log "Using system ngrok: ${NGROK_BIN}"
 else
     log "Downloading ngrok..."
-    curl -fsSL -o ngrok.tgz "https://ngrok-agent.s3.amazonaws.com/ngrok-v3-stable-linux-amd64.tgz"
-    tar -xzf ngrok.tgz ngrok && chmod +x ngrok && rm -f ngrok.tgz
-    NGROK_BIN="${PWD}/ngrok"
-    log "ngrok downloaded."
+    # Try multiple mirrors -- the equinox CDN is the official source
+    for url in \
+        "https://bin.equinox.io/c/bNyjFmdUd9w/ngrok-v3-stable-linux-amd64.tgz" \
+        "https://ngrok-agent.s3.amazonaws.com/ngrok-v3-stable-linux-amd64.tgz"; do
+        if curl -fsSL --max-time 30 -o ngrok.tgz "$url" 2>/dev/null; then
+            if file ngrok.tgz | grep -qi gzip; then
+                tar -xzf ngrok.tgz ngrok 2>/dev/null && chmod +x ngrok && rm -f ngrok.tgz && {
+                    NGROK_BIN="${PWD}/ngrok"
+                    log "ngrok downloaded."
+                    break
+                }
+            fi
+        fi
+        rm -f ngrok.tgz
+    done
+    if [[ ! -x "$NGROK_BIN" ]]; then
+        error "Could not download ngrok. Please install manually: https://ngrok.com/download"
+        exit 1
+    fi
 fi
 
 [[ -z "${NGROK_AUTHTOKEN:-}" ]] && { error "Set NGROK_AUTHTOKEN"; exit 1; }
