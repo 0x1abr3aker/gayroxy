@@ -1,171 +1,104 @@
 #!/usr/bin/env bash
 # set -euo pipefail
 
-# Configuration
+# ─── Configuration ───────────────────────────────────────────────────────────
 XRAY_DIR="${PWD}"
 CONFIG_FILE="${XRAY_DIR}/config.json"
 XRAY_BIN="${XRAY_DIR}/xray"
 NGROK_BIN="${XRAY_DIR}/ngrok"
-LOCAL_PORT="${PROXY_PORT:-$(shuf -i 10000-65535 -n 1)}"
-WS_PATH="${WS_PATH:-/$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo ws$RANDOM)}"
+NGROK_YML="${XRAY_DIR}/ngrok.yml"
+SUB_DIR="${XRAY_DIR}/sub"
+SUB_PORT=8080
+
+# Ports for each inbound
+PORT_VLESS_R=443
+PORT_VLESS_WS=8443
+PORT_TROJAN=8444
+PORT_VMESS=8445
+
 NGROK_API="http://127.0.0.1:4040/api/tunnels"
 
-# Colors
+# ─── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GRN='\033[0;32m'
 YEL='\033[1;33m'
 BLU='\033[0;34m'
+CYAN='\033[0;36m'
+MAG='\033[0;35m'
 NC='\033[0m'
 
-log() { echo -e "${GRN}[proxy.sh]${NC} $1"; }
-warn() { echo -e "${YEL}[proxy.sh] WARNING${NC} $1"; }
+log()   { echo -e "${GRN}[proxy.sh]${NC} $1"; }
+warn()  { echo -e "${YEL}[proxy.sh] WARNING${NC} $1"; }
 error() { echo -e "${RED}[proxy.sh] ERROR${NC} $1"; }
+info()  { echo -e "${CYAN}[proxy.sh]${NC} $1"; }
+
+# ─── Generators ─────────────────────────────────────────────────────────────
+gen_uuid() {
+    local u
+    u=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || openssl rand -hex 16 2>/dev/null)
+    if [[ ${#u} -ne 36 ]]; then
+        u=$(python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 32 | head -n 1 | sed 's/\(........\)\(....\)\(....\)\(....\)\(............\)/\1-\2-\3-\4-\5/')
+    fi
+    echo "$u"
+}
+
+gen_pass() { openssl rand -base64 16 | tr -d '=+/' | cut -c1-16; }
+gen_shortid() { openssl rand -hex 8; }
 
 help_msg() {
     cat <<EOF
-Usage: ./proxy.sh [options]
+Usage: NGROK_AUTHTOKEN=xxx ./proxy.sh
 
-Environment Variables:
-  NGROK_AUTHTOKEN   Required. Your ngrok authtoken.
-  NGROK_DOMAIN      Required. Your free static ngrok domain (e.g. your-name.ngrok-free.app).
-                    Reserve one at: https://dashboard.ngrok.com/domains
-  PROXY_PORT        Optional. Local port for xray to bind (default: random 10000-65535).
-  WS_PATH           Optional. WebSocket path (default: random UUID-based path).
-
-Examples:
-  NGROK_AUTHTOKEN=2KPyZ... NGROK_DOMAIN=your-name.ngrok-free.app ./proxy.sh
-  NGROK_AUTHTOKEN=2KPyZ... NGROK_DOMAIN=your-name.ngrok-free.app PROXY_PORT=8080 ./proxy.sh
-
-Note:
-  This script uses an ngrok HTTP tunnel with your free static domain, since
-  free ngrok accounts require card verification for raw TCP tunnels. Because
-  HTTP tunnels terminate TLS at ngrok's edge, Xray is configured with
-  VLESS + WebSocket (no Reality/XTLS) instead of VLESS + Reality.
+Needs: curl, unzip, python3 (auto-installed)
 EOF
 }
 
-# 1. Parse args
-for arg in "$@"; do
-    case "$arg" in
-        -h|--help)
-            help_msg
-            exit 0
-            ;;
-        --status)
-            echo "To get your ngrok authtoken:"
-            echo "  1. Sign up/login at https://dashboard.ngrok.com"
-            echo "  2. Go to 'Your Authtoken' section"
-            echo "  3. Copy the token and run:"
-            echo "     export NGROK_AUTHTOKEN=<your_token>"
-            echo "     ./proxy.sh"
-            exit 0
-            ;;
-    esac
-done
+for arg in "$@"; do case "$arg" in -h|--help) help_msg; exit 0;; esac; done
 
-# 2. Check OS
+# ─── OS check ────────────────────────────────────────────────────────────────
 if [[ -f /etc/os-release ]]; then
     . /etc/os-release
-    if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
-        warn "Unsupported OS: $ID. This script is tested on Ubuntu/Debian. Proceeding anyway..."
-    fi
-else
-    warn "Cannot detect OS. Proceeding anyway..."
+    [[ "$ID" != "ubuntu" && "$ID" != "debian" ]] && warn "Untested OS: $ID"
 fi
 
-# 3. Install system dependencies
-log "Checking system dependencies..."
-MISSING_PKGS=()
-for pkg in curl unzip; do
-    if ! command -v "$pkg" &> /dev/null; then
-        MISSING_PKGS+=("$pkg")
-    fi
-done
-
-if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
-    log "Installing missing packages: ${MISSING_PKGS[*]}"
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq "${MISSING_PKGS[@]}"
-    elif command -v apk &> /dev/null; then
-        sudo apk add --no-cache "${MISSING_PKGS[@]}"
-    elif command -v yum &> /dev/null; then
-        sudo yum install -y "${MISSING_PKGS[@]}"
-    elif command -v dnf &> /dev/null; then
-        sudo dnf install -y "${MISSING_PKGS[@]}"
+# ─── Install deps ────────────────────────────────────────────────────────────
+log "Checking dependencies..."
+MISSING=()
+for pkg in curl unzip python3; do command -v "$pkg" &>/dev/null || MISSING+=("$pkg"); done
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    log "Installing: ${MISSING[*]}"
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq "${MISSING[@]}"
+    elif command -v apk &>/dev/null; then
+        sudo apk add --no-cache "${MISSING[@]}"
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y "${MISSING[@]}"
     else
-        error "Cannot install missing packages automatically. Please install: ${MISSING_PKGS[*]}"
-        exit 1
-    fi
-    log "Dependencies installed."
-else
-    log "All system dependencies are present."
-fi
-
-# 4. Check for ngrok (system or local), installing via apt if possible
-NGROK_SYSTEM=$(which ngrok 2>/dev/null || echo "")
-if [[ -n "$NGROK_SYSTEM" && -x "$NGROK_SYSTEM" ]]; then
-    NGROK_BIN="$NGROK_SYSTEM"
-    log "Using system ngrok: $NGROK_BIN"
-elif command -v apt-get &> /dev/null; then
-    log "Installing ngrok via apt..."
-    if ! command -v gpg &> /dev/null; then
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq gnupg
-    fi
-    curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-        | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-    echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
-        | sudo tee /etc/apt/sources.list.d/ngrok.list >/dev/null
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq ngrok
-
-    NGROK_SYSTEM=$(which ngrok 2>/dev/null || echo "")
-    if [[ -n "$NGROK_SYSTEM" && -x "$NGROK_SYSTEM" ]]; then
-        NGROK_BIN="$NGROK_SYSTEM"
-        log "ngrok installed via apt: $NGROK_BIN"
-    else
-        warn "apt install of ngrok did not produce a usable binary. Falling back to direct download."
-        NGROK_SYSTEM=""
+        error "Cannot install: ${MISSING[*]}"; exit 1
     fi
 fi
 
-if [[ -z "$NGROK_SYSTEM" && ! -x "$NGROK_BIN" ]]; then
-    log "Falling back to direct ngrok binary download..."
+# ─── Install ngrok ───────────────────────────────────────────────────────────
+if command -v ngrok &>/dev/null; then
+    NGROK_BIN=$(which ngrok)
+    log "Using system ngrok: ${NGROK_BIN}"
+elif [[ ! -x "$NGROK_BIN" ]]; then
+    log "Downloading ngrok..."
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)  NGROK_ARCH="linux-amd64" ;;
         aarch64) NGROK_ARCH="linux-arm64" ;;
         armv7l)  NGROK_ARCH="linux-arm" ;;
-        *)       error "Unsupported architecture for ngrok: $ARCH"; exit 1 ;;
+        *)       error "Unsupported arch: $ARCH"; exit 1 ;;
     esac
-    NGROK_URL="https://bin.equinox.io/c/bNyjFmdUd9w/ngrok-v3-stable-${NGROK_ARCH}.tgz"
-    curl -L --progress-bar -o ngrok.tgz "$NGROK_URL"
-    tar -xzf ngrok.tgz ngrok
-    chmod +x ngrok
-    rm -f ngrok.tgz
-    log "ngrok downloaded and extracted to $NGROK_BIN."
-elif [[ -z "$NGROK_SYSTEM" ]]; then
-    log "ngrok already exists locally at $NGROK_BIN."
+    curl -L --progress-bar -o ngrok.tgz "https://bin.equinox.io/c/bNyjFmdUd9w/ngrok-v3-stable-${NGROK_ARCH}.tgz"
+    tar -xzf ngrok.tgz ngrok && chmod +x ngrok && rm -f ngrok.tgz
+    log "ngrok installed."
 fi
 
-# Verify ngrok authtoken is set
-if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
-    error "NGROK_AUTHTOKEN is not set."
-    echo "Run: export NGROK_AUTHTOKEN=<your_token> then re-run this script."
-    echo "Get your token at: https://dashboard.ngrok.com/get-started/your-authtoken"
-    exit 1
-fi
+[[ -z "${NGROK_AUTHTOKEN:-}" ]] && { error "Set NGROK_AUTHTOKEN"; exit 1; }
 
-# Verify a static ngrok domain is set (required for the free-tier HTTP tunnel)
-if [[ -z "${NGROK_DOMAIN:-}" ]]; then
-    error "NGROK_DOMAIN is not set."
-    echo "Reserve your free static domain here: https://dashboard.ngrok.com/domains"
-    echo "Then run: export NGROK_DOMAIN=<your-domain>.ngrok-free.app"
-    exit 1
-fi
-
-# 5. Download Xray-core if not present
+# ─── Install xray ────────────────────────────────────────────────────────────
 if [[ ! -x "$XRAY_BIN" ]]; then
     log "Downloading xray-core..."
     ARCH=$(uname -m)
@@ -173,159 +106,250 @@ if [[ ! -x "$XRAY_BIN" ]]; then
         x86_64)  XRAY_ARCH="Xray-linux-64.zip" ;;
         aarch64) XRAY_ARCH="Xray-linux-arm64-v8a.zip" ;;
         armv7l)  XRAY_ARCH="Xray-linux-arm32-v7a.zip" ;;
-        *)       error "Unsupported architecture: $ARCH"; exit 1 ;;
+        *)       error "Unsupported arch: $ARCH"; exit 1 ;;
     esac
-    RELEASE_JSON=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest)
-    if echo "$RELEASE_JSON" | grep -q '"message": *"API rate limit exceeded'; then
-        error "GitHub API rate limit exceeded while looking up xray-core releases."
-        echo "Set GITHUB_TOKEN (or GH_TOKEN) in the environment to authenticate and raise the limit, then retry."
-        exit 1
-    fi
-    LATEST_URL=$(echo "$RELEASE_JSON" \
-        | grep "\"browser_download_url\":" \
-        | grep "${XRAY_ARCH}\"" \
-        | head -n1 \
-        | cut -d '"' -f 4)
-    if [[ -z "$LATEST_URL" ]]; then
-        error "Failed to find xray-core download URL for $ARCH"
-        exit 1
-    fi
-    curl -L --progress-bar -o xray.zip "$LATEST_URL"
+    LATEST=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep "browser_download_url.*${XRAY_ARCH}" | cut -d'"' -f4)
+    curl -L --progress-bar -o xray.zip "$LATEST"
     unzip -o xray.zip xray 2>/dev/null || true
-    chmod +x xray
-    rm -f xray.zip
-    log "xray-core downloaded."
-else
-    log "xray-core already exists."
+    chmod +x xray && rm -f xray.zip
+    log "xray-core installed."
 fi
 
-# 6. Generate UUID (no Reality keys needed for WS transport)
-UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen || openssl rand -hex 16)
-if [[ ${#UUID} -ne 36 ]]; then
-    UUID=$(python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 32 | head -n 1 | sed 's/\(........\)\(....\)\(....\)\(....\)\(............\)/\1-\2-\3-\4-\5/')
-fi
+# ─── Generate credentials ────────────────────────────────────────────────────
+log "Generating credentials..."
+UUID_VLESS=$(gen_uuid)
+UUID_WS=$(gen_uuid)
+UUID_VMESS=$(gen_uuid)
+TROJAN_PASS=$(gen_pass)
+SHORTID=$(gen_shortid)
 
-# 7. Write Xray config (VLESS + WebSocket; TLS is terminated by ngrok's edge,
-#    so Xray's own security stays "none" here)
-cat > "$CONFIG_FILE" <<EOF
+log "Generating Reality key pair..."
+KEYS=$($XRAY_BIN x25519 2>/dev/null)
+REALITY_PRIV=$(echo "$KEYS" | grep "Private key:" | awk '{print $3}')
+REALITY_PUB=$(echo "$KEYS" | grep "Public key:" | awk '{print $3}')
+WS_PATH="/$(echo $UUID_WS | cut -d'-' -f1)"
+
+# ─── Write Xray unified config ─────────────────────────────────────────────
+log "Writing Xray config..."
+mkdir -p "$SUB_DIR"
+
+cat > "$CONFIG_FILE" <<'XRAY_EOF'
 {
-  "log": { "access": "", "error": "" },
+  "log": {"access": "", "error": ""},
   "inbounds": [
     {
-      "listen": "127.0.0.1",
-      "port": ${LOCAL_PORT},
+      "tag": "vless-reality",
+      "port": @PORT_VLESS_R@,
       "protocol": "vless",
       "settings": {
-        "clients": [
-          {
-            "id": "${UUID}"
-          }
-        ],
+        "clients": [{"id": "@UUID_VLESS@", "flow": "xtls-rprx-vision"}],
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "ws",
-        "security": "none",
-        "wsSettings": {
-          "path": "${WS_PATH}"
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "www.apple.com:443",
+          "xver": 0,
+          "serverNames": ["www.apple.com"],
+          "privateKey": "@REALITY_PRIV@",
+          "shortIds": ["@SHORTID@"],
+          "fingerprint": "chrome"
         }
       },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": ["http", "tls", "quic"]
-      }
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
+    },
+    {
+      "tag": "vless-ws",
+      "port": @PORT_VLESS_WS@,
+      "protocol": "vless",
+      "settings": {"clients": [{"id": "@UUID_WS@"}], "decryption": "none"},
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {"path": "@WS_PATH@"}
+      },
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
+    },
+    {
+      "tag": "trojan",
+      "port": @PORT_TROJAN@,
+      "protocol": "trojan",
+      "settings": {"clients": [{"password": "@TROJAN_PASS@"}]},
+      "streamSettings": {
+        "network": "tcp",
+        "security": "none"
+      },
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
+    },
+    {
+      "tag": "vmess",
+      "port": @PORT_VMESS@,
+      "protocol": "vmess",
+      "settings": {"clients": [{"id": "@UUID_VMESS@", "alterId": 0}]},
+      "streamSettings": {
+        "network": "tcp",
+        "security": "none"
+      },
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
     }
   ],
   "outbounds": [
-    {
-      "protocol": "freedom",
-      "settings": {}
-    }
+    {"protocol": "freedom", "settings": {}},
+    {"protocol": "blackhole", "settings": {}, "tag": "blocked"}
   ]
 }
-EOF
+XRAY_EOF
 
-log "Config written to $CONFIG_FILE"
-log "Local port: $LOCAL_PORT"
-log "UUID: $UUID"
-log "WS path: $WS_PATH"
+# Replace placeholders
+sed -i "s|@PORT_VLESS_R@|${PORT_VLESS_R}|g; s|@PORT_VLESS_WS@|${PORT_VLESS_WS}|g; s|@PORT_TROJAN@|${PORT_TROJAN}|g; s|@PORT_VMESS@|${PORT_VMESS}|g; s|@UUID_VLESS@|${UUID_VLESS}|g; s|@UUID_WS@|${UUID_WS}|g; s|@UUID_VMESS@|${UUID_VMESS}|g; s|@TROJAN_PASS@|${TROJAN_PASS}|g; s|@REALITY_PRIV@|${REALITY_PRIV}|g; s|@SHORTID@|${SHORTID}|g; s|@WS_PATH@|${WS_PATH}|g" "$CONFIG_FILE"
 
-# 8. Start ngrok HTTP tunnel with the static domain in background
-log "Starting ngrok HTTP tunnel on port $LOCAL_PORT with domain $NGROK_DOMAIN..."
-$NGROK_BIN http --domain="$NGROK_DOMAIN" $LOCAL_PORT &
+# ─── Start ngrok with config file ───────────────────────────────────────────
+log "Starting ngrok tunnels..."
+
+cat > "$NGROK_YML" <<NGROK_EOF
+version: "3"
+agent:
+  authtoken: ${NGROK_AUTHTOKEN}\nendpoints:
+  - name: vless-reality
+    upstream:
+      url: tcp://localhost:${PORT_VLESS_R}
+  - name: vless-ws
+    upstream:
+      url: http://localhost:${PORT_VLESS_WS}
+  - name: trojan
+    upstream:
+      url: tcp://localhost:${PORT_TROJAN}
+  - name: vmess
+    upstream:
+      url: tcp://localhost:${PORT_VMESS}
+  - name: subscription
+    upstream:
+      url: http://localhost:${SUB_PORT}
+NGROK_EOF
+
+$NGROK_BIN start --all --config "${NGROK_YML}" > /dev/null 2>&1 &
 NGROK_PID=$!
 
-# 9. Wait for ngrok to establish tunnel and extract public URL
-MAX_RETRIES=30
-NGROK_URL=""
-for ((i=1; i<=MAX_RETRIES; i++)); do
-    sleep 1
-    NGROK_DATA=$(curl -s "$NGROK_API" 2>/dev/null || true)
-    if [[ -n "$NGROK_DATA" ]]; then
-        NGROK_URL=$(echo "$NGROK_DATA" | grep -o '"public_url":"https://[^"]*"' | head -n1 | sed 's/.*"public_url":"\(.*\)"/\1/')
-        if [[ -n "$NGROK_URL" ]]; then
-            break
-        fi
-    fi
+# ─── Wait for ngrok and collect URLs ─────────────────────────────────────────
+log "Waiting for ngrok tunnels..."
+NGROK_VLESS=""; NGROK_WS=""; NGROK_TROJAN=""; NGROK_VMESS=""; NGROK_SUB=""
+for ((i=1; i<=40; i++)); do
+    sleep 2
+    DATA=$(curl -s "$NGROK_API" 2>/dev/null || true)
+    [[ -z "$DATA" ]] && continue
+
+    NGROK_VLESS=$(echo "$DATA" | grep -o '"public_url":"tcp://[^"]*"' | grep -o 'tcp://[^"]*' | sed 's/tcp://\(.*\)/\1/' | sed -n '1p')
+    NGROK_WS=$(echo "$DATA" | grep -o '"public_url":"tcp://[^"]*"' | grep -o 'tcp://[^"]*' | sed 's/tcp://\(.*\)/\1/' | sed -n '2p')
+    NGROK_TROJAN=$(echo "$DATA" | grep -o '"public_url":"tcp://[^"]*"' | grep -o 'tcp://[^"]*' | sed 's/tcp://\(.*\)/\1/' | sed -n '3p')
+    NGROK_VMESS=$(echo "$DATA" | grep -o '"public_url":"tcp://[^"]*"' | grep -o 'tcp://[^"]*' | sed 's/tcp://\(.*\)/\1/' | sed -n '4p')
+    NGROK_SUB=$(echo "$DATA" | grep -o '"public_url":"http://[^"]*"' | grep -o 'http://[^"]*' | sed -n '1p')
+
+    # If we have the reality tunnel and a subscription, we're good
+    [[ -n "$NGROK_VLESS" && -n "$NGROK_SUB" ]] && break
 done
 
-if [[ -z "$NGROK_URL" ]]; then
-    error "ngrok failed to establish a tunnel. Check your NGROK_AUTHTOKEN, NGROK_DOMAIN, and internet connection."
+if [[ -z "$NGROK_VLESS" || -z "$NGROK_SUB" ]]; then
+    error "ngrok failed to establish tunnels. Check your token."
     kill $NGROK_PID 2>/dev/null || true
     exit 1
 fi
 
-log "ngrok tunnel established: ${NGROK_URL}"
+log "ngrok tunnels ready."
 
-# Host is the static domain; ngrok serves HTTPS on 443
-NGROK_HOST="$NGROK_DOMAIN"
-NGROK_PORT=443
-WS_PATH_ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "${WS_PATH}" 2>/dev/null || echo "${WS_PATH}")
+# ─── Parse endpoints ─────────────────────────────────────────────────────────
+VL_HOST=$(echo "$NGROK_VLESS" | cut -d':' -f1)
+VL_PORT=$(echo "$NGROK_VLESS" | cut -d':' -f2)
+WS_HOST=$(echo "$NGROK_WS" | cut -d':' -f1)
+WS_PORT=$(echo "$NGROK_WS" | cut -d':' -f2)
+TR_HOST=$(echo "$NGROK_TROJAN" | cut -d':' -f1)
+TR_PORT=$(echo "$NGROK_TROJAN" | cut -d':' -f2)
+VM_HOST=$(echo "$NGROK_VMESS" | cut -d':' -f1)
+VM_PORT=$(echo "$NGROK_VMESS" | cut -d':' -f2)
 
-# 10. Print client config
-VLESS_LINK="vless://${UUID}@${NGROK_HOST}:${NGROK_PORT}?security=tls&type=ws&host=${NGROK_HOST}&path=${WS_PATH_ENC}&encryption=none#ngrok-xray"
+# ─── Build subscription content ──────────────────────────────────────────────
+VLESS_RE_LINK="vless://${UUID_VLESS}@${VL_HOST}:${VL_PORT}?security=reality&fp=chrome&pbk=${REALITY_PUB}&sid=${SHORTID}&type=tcp&flow=xtls-rprx-vision&sni=www.apple.com&encryption=none#ngrok-vless-reality"
+VLESS_WS_LINK="vless://${UUID_WS}@${WS_HOST}:${WS_PORT}?type=ws&path=${WS_PATH}&encryption=none#ngrok-vless-ws"
+TROJAN_LINK="trojan://${TROJAN_PASS}@${TR_HOST}:${TR_PORT}#ngrok-trojan"
 
+VMESS_JSON='{"v":"2","ps":"ngrok-vmess","add":"'"${VM_HOST}"'","port":"'"${VM_PORT}"'","id":"'"${UUID_VMESS}"'","aid":"0","net":"tcp","type":"none","tls":"none"}'
+VMESS_LINK="vmess://$(echo -n "$VMESS_JSON" | base64 -w 0)"
+
+# Combine all links
+SUB_RAW="${VLESS_RE_LINK}
+${VLESS_WS_LINK}
+${TROJAN_LINK}
+${VMESS_LINK}"
+
+SUB_BASE64=$(echo -n "$SUB_RAW" | base64 -w 0)
+echo "$SUB_BASE64" > "${SUB_DIR}/subscription.b64"
+
+# ─── Start subscription HTTP server ────────────────────────────────────────────
+log "Starting subscription server on port ${SUB_PORT}..."
+python3 <<PYEOF &
+import http.server, socketserver, os, base64
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ('/sub', '/sub.txt', '/subscription'):
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Disposition', 'inline; filename=subscription.txt')
+            self.end_headers()
+            with open('${SUB_DIR}/subscription.b64', 'rb') as f:
+                self.wfile.write(f.read())
+        else:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b"""<h1>Proxy Subscription Server</h1>
+<p><a href=\"/sub\">Subscription (base64)</a></p>
+<p>Import /sub into your V2Ray client.</p>""")
+
+with socketserver.TCPServer(('0.0.0.0', ${SUB_PORT}), Handler) as httpd:
+    httpd.serve_forever()
+PYEOF
+SUB_PID=$!
+
+# ─── Final output ───────────────────────────────────────────────────────────
 echo ""
 echo "=========================================="
-echo "  🚀 Xray Proxy Server Ready!"
+echo "  🚀 Multi-Protocol Proxy Ready!"
 echo "=========================================="
 echo ""
-echo -e "  ${BLU}Public Endpoint:${NC}   ${NGROK_URL}"
-echo -e "  ${BLU}UUID:${NC}             ${UUID}"
-echo -e "  ${BLU}Network:${NC}          ws"
-echo -e "  ${BLU}WS Path:${NC}          ${WS_PATH}"
-echo -e "  ${BLU}Security:${NC}         tls (terminated at ngrok edge)"
+echo -e "  ${MAG}Subscription URL:${NC} ${NGROK_SUB}/sub"
 echo ""
 echo "------------------------------------------"
-echo "  VLESS Share Link:"
-echo "  ${VLESS_LINK}"
+echo -e "  ${GRN}1. VLESS + Reality + XTLS (Recommended)${NC}"
+echo -e "     Endpoint: ${VL_HOST}:${VL_PORT}"
 echo ""
-echo "  Or use this JSON for manual setup:"
-echo "  {"
-echo "    \"v\": \"2\","
-echo "    \"ps\": \"ngrok-xray\","
-echo "    \"add\": \"${NGROK_HOST}\","
-echo "    \"port\": \"${NGROK_PORT}\","
-echo "    \"id\": \"${UUID}\","
-echo "    \"aid\": \"0\","
-echo "    \"net\": \"ws\","
-echo "    \"type\": \"none\","
-echo "    \"host\": \"${NGROK_HOST}\","
-echo "    \"path\": \"${WS_PATH}\","
-echo "    \"tls\": \"tls\""
-echo "  }"
+echo -e "  ${GRN}2. VLESS + WebSocket${NC}"
+echo -e "     Endpoint: ${WS_HOST}:${WS_PORT} | Path: ${WS_PATH}"
+echo ""
+echo -e "  ${GRN}3. Trojan${NC}"
+echo -e "     Endpoint: ${TR_HOST}:${TR_PORT} | Pass: ${TROJAN_PASS}"
+echo ""
+echo -e "  ${GRN}4. VMess${NC}"
+echo -e "     Endpoint: ${VM_HOST}:${VM_PORT}"
+echo ""
+echo "------------------------------------------"
+echo "  Links:"
+echo "  ${VLESS_RE_LINK}"
 echo ""
 echo "=========================================="
 echo ""
 
-# 11. Start Xray in foreground, cleaning up ngrok on exit
+# ─── Cleanup trap ────────────────────────────────────────────────────────────
 cleanup() {
-    log "Stopping ngrok (PID: $NGROK_PID)..."
+    log "Stopping services..."
     kill $NGROK_PID 2>/dev/null || true
+    kill $SUB_PID 2>/dev/null || true
     wait $NGROK_PID 2>/dev/null || true
-    log "Cleanup complete."
+    wait $SUB_PID 2>/dev/null || true
+    log "All services stopped."
 }
 trap cleanup INT TERM EXIT
 
-log "Starting xray-core... (Press Ctrl-C to stop)"
+log "Starting Xray-core... (Ctrl-C to stop)"
 $XRAY_BIN run -c "$CONFIG_FILE"
