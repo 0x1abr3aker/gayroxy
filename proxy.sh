@@ -7,9 +7,7 @@ CONFIG_FILE="${XRAY_DIR}/config.json"
 XRAY_BIN="${XRAY_DIR}/xray"
 NGROK_BIN="${XRAY_DIR}/ngrok"
 LOCAL_PORT="${PROXY_PORT:-$(shuf -i 10000-65535 -n 1)}"
-# Reality destination: a high-traffic site supporting TLS 1.3 and HTTP/2
-REALITY_DEST="www.apple.com:443"
-SERVER_NAME="www.apple.com"
+WS_PATH="${WS_PATH:-/$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo ws$RANDOM)}"
 NGROK_API="http://127.0.0.1:4040/api/tunnels"
 
 # Colors
@@ -29,15 +27,20 @@ Usage: ./proxy.sh [options]
 
 Environment Variables:
   NGROK_AUTHTOKEN   Required. Your ngrok authtoken.
+  NGROK_DOMAIN      Required. Your free static ngrok domain (e.g. your-name.ngrok-free.app).
+                    Reserve one at: https://dashboard.ngrok.com/domains
   PROXY_PORT        Optional. Local port for xray to bind (default: random 10000-65535).
-
-Options:
-  -h, --help        Show this help message.
-  --status          Show how to set up ngrok authtoken.
+  WS_PATH           Optional. WebSocket path (default: random UUID-based path).
 
 Examples:
-  NGROK_AUTHTOKEN=2KPyZ... ./proxy.sh
-  NGROK_AUTHTOKEN=2KPyZ... PROXY_PORT=443 ./proxy.sh
+  NGROK_AUTHTOKEN=2KPyZ... NGROK_DOMAIN=your-name.ngrok-free.app ./proxy.sh
+  NGROK_AUTHTOKEN=2KPyZ... NGROK_DOMAIN=your-name.ngrok-free.app PROXY_PORT=8080 ./proxy.sh
+
+Note:
+  This script uses an ngrok HTTP tunnel with your free static domain, since
+  free ngrok accounts require card verification for raw TCP tunnels. Because
+  HTTP tunnels terminate TLS at ngrok's edge, Xray is configured with
+  VLESS + WebSocket (no Reality/XTLS) instead of VLESS + Reality.
 EOF
 }
 
@@ -154,6 +157,14 @@ if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
     exit 1
 fi
 
+# Verify a static ngrok domain is set (required for the free-tier HTTP tunnel)
+if [[ -z "${NGROK_DOMAIN:-}" ]]; then
+    error "NGROK_DOMAIN is not set."
+    echo "Reserve your free static domain here: https://dashboard.ngrok.com/domains"
+    echo "Then run: export NGROK_DOMAIN=<your-domain>.ngrok-free.app"
+    exit 1
+fi
+
 # 5. Download Xray-core if not present
 if [[ ! -x "$XRAY_BIN" ]]; then
     log "Downloading xray-core..."
@@ -188,56 +199,35 @@ else
     log "xray-core already exists."
 fi
 
-# 6. Generate UUID and Reality keys
+# 6. Generate UUID (no Reality keys needed for WS transport)
 UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen || openssl rand -hex 16)
 if [[ ${#UUID} -ne 36 ]]; then
     UUID=$(python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 32 | head -n 1 | sed 's/\(........\)\(....\)\(....\)\(....\)\(............\)/\1-\2-\3-\4-\5/')
 fi
 
-log "Generating Reality key pair..."
-KEYS=$($XRAY_BIN x25519 2>/dev/null)
-if [[ -z "$KEYS" ]]; then
-    error "Failed to generate x25519 keys with xray binary."
-    exit 1
-fi
-PRIVATE_KEY=$(echo "$KEYS" | grep -E "^(PrivateKey):" | awk '{print $NF}')
-PUBLIC_KEY=$(echo "$KEYS" | grep -E "(\(PublicKey\)):" | awk '{print $NF}')
-
-if [[ -z "$PRIVATE_KEY" || -z "$PUBLIC_KEY" ]]; then
-    error "Failed to parse x25519 keys."
-    exit 1
-fi
-
-# 7. Write Xray config
+# 7. Write Xray config (VLESS + WebSocket; TLS is terminated by ngrok's edge,
+#    so Xray's own security stays "none" here)
 cat > "$CONFIG_FILE" <<EOF
 {
   "log": { "access": "", "error": "" },
   "inbounds": [
     {
+      "listen": "127.0.0.1",
       "port": ${LOCAL_PORT},
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "id": "${UUID}",
-            "flow": "xtls-rprx-vision"
+            "id": "${UUID}"
           }
         ],
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "dest": "${REALITY_DEST}",
-          "xver": 0,
-          "serverNames": [
-            "${SERVER_NAME}"
-          ],
-          "privateKey": "${PRIVATE_KEY}",
-          "shortIds": [""],
-          "fingerprint": "chrome"
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {
+          "path": "${WS_PATH}"
         }
       },
       "sniffing": {
@@ -258,10 +248,11 @@ EOF
 log "Config written to $CONFIG_FILE"
 log "Local port: $LOCAL_PORT"
 log "UUID: $UUID"
+log "WS path: $WS_PATH"
 
-# 8. Start ngrok TCP tunnel in background
-log "Starting ngrok TCP tunnel on port $LOCAL_PORT..."
-$NGROK_BIN tcp $LOCAL_PORT &
+# 8. Start ngrok HTTP tunnel with the static domain in background
+log "Starting ngrok HTTP tunnel on port $LOCAL_PORT with domain $NGROK_DOMAIN..."
+$NGROK_BIN http --domain="$NGROK_DOMAIN" $LOCAL_PORT &
 NGROK_PID=$!
 
 # 9. Wait for ngrok to establish tunnel and extract public URL
@@ -271,7 +262,7 @@ for ((i=1; i<=MAX_RETRIES; i++)); do
     sleep 1
     NGROK_DATA=$(curl -s "$NGROK_API" 2>/dev/null || true)
     if [[ -n "$NGROK_DATA" ]]; then
-        NGROK_URL=$(echo "$NGROK_DATA" | grep -o '"public_url":"tcp://[^"]*"' | head -n1 | sed 's/.*"tcp://\(.*\)".*/\1/')
+        NGROK_URL=$(echo "$NGROK_DATA" | grep -o '"public_url":"https://[^"]*"' | head -n1 | sed 's/.*"public_url":"\(.*\)"/\1/')
         if [[ -n "$NGROK_URL" ]]; then
             break
         fi
@@ -279,19 +270,20 @@ for ((i=1; i<=MAX_RETRIES; i++)); do
 done
 
 if [[ -z "$NGROK_URL" ]]; then
-    error "ngrok failed to establish a tunnel. Check your NGROK_AUTHTOKEN and internet connection."
+    error "ngrok failed to establish a tunnel. Check your NGROK_AUTHTOKEN, NGROK_DOMAIN, and internet connection."
     kill $NGROK_PID 2>/dev/null || true
     exit 1
 fi
 
 log "ngrok tunnel established: ${NGROK_URL}"
 
-# Extract host and port from ngrok URL
-NGROK_HOST=$(echo "$NGROK_URL" | cut -d':' -f1)
-NGROK_PORT=$(echo "$NGROK_URL" | cut -d':' -f2)
+# Host is the static domain; ngrok serves HTTPS on 443
+NGROK_HOST="$NGROK_DOMAIN"
+NGROK_PORT=443
+WS_PATH_ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "${WS_PATH}" 2>/dev/null || echo "${WS_PATH}")
 
 # 10. Print client config
-VLESS_LINK="vless://${UUID}@${NGROK_HOST}:${NGROK_PORT}?security=reality&fp=chrome&pbk=${PUBLIC_KEY}&sid=&type=tcp&flow=xtls-rprx-vision&sni=${SERVER_NAME}&encryption=none#ngrok-xray"
+VLESS_LINK="vless://${UUID}@${NGROK_HOST}:${NGROK_PORT}?security=tls&type=ws&host=${NGROK_HOST}&path=${WS_PATH_ENC}&encryption=none#ngrok-xray"
 
 echo ""
 echo "=========================================="
@@ -299,11 +291,10 @@ echo "  🚀 Xray Proxy Server Ready!"
 echo "=========================================="
 echo ""
 echo -e "  ${BLU}Public Endpoint:${NC}   ${NGROK_URL}"
-echo -e "  ${BLU}Server Name (SNI):${NC} ${SERVER_NAME}"
 echo -e "  ${BLU}UUID:${NC}             ${UUID}"
-echo -e "  ${BLU}Flow:${NC}             xtls-rprx-vision"
-echo -e "  ${BLU}Security:${NC}         reality"
-echo -e "  ${BLU}Fingerprint:${NC}      chrome"
+echo -e "  ${BLU}Network:${NC}          ws"
+echo -e "  ${BLU}WS Path:${NC}          ${WS_PATH}"
+echo -e "  ${BLU}Security:${NC}         tls (terminated at ngrok edge)"
 echo ""
 echo "------------------------------------------"
 echo "  VLESS Share Link:"
@@ -317,17 +308,11 @@ echo "    \"add\": \"${NGROK_HOST}\","
 echo "    \"port\": \"${NGROK_PORT}\","
 echo "    \"id\": \"${UUID}\","
 echo "    \"aid\": \"0\","
-echo "    \"net\": \"tcp\","
+echo "    \"net\": \"ws\","
 echo "    \"type\": \"none\","
-echo "    \"host\": \"\","
-echo "    \"path\": \"\","
-echo "    \"tls\": \"reality\","
-echo "    \"sni\": \"${SERVER_NAME}\","
-echo "    \"fp\": \"chrome\","
-echo "    \"pbk\": \"${PUBLIC_KEY}\","
-echo "    \"sid\": \"\","
-echo "    \"spx\": \"\","
-echo "    \"flow\": \"xtls-rprx-vision\""
+echo "    \"host\": \"${NGROK_HOST}\","
+echo "    \"path\": \"${WS_PATH}\","
+echo "    \"tls\": \"tls\""
 echo "  }"
 echo ""
 echo "=========================================="
