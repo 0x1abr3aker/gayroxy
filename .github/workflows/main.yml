@@ -1,0 +1,42 @@
+name: Run Proxy
+
+on:
+  # Manual trigger only – avoids infinite loops on push/PR
+  workflow_dispatch:
+
+  # Optionally also allow a schedule (e.g., every 6 hours)
+  # schedule:
+  #   - cron: '0 */6 * * *'
+
+# Permissions needed to trigger a new workflow run
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  run-proxy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x proxy.sh
+
+      - name: Run proxy script
+        id: proxy
+        continue-on-error: true   # don't fail the job even if script exits with error
+        env:
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: ./proxy.sh
+
+      - name: Re‑trigger this workflow
+        # Always run this step, even if the script failed
+        if: always()
+        run: |
+          echo "Proxy run finished with exit code ${{ steps.proxy.outcome }}"
+          echo "🔄 Triggering a new run of this workflow..."
+          gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}"
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
