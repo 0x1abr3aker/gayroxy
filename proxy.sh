@@ -164,7 +164,17 @@ if [[ ! -x "$XRAY_BIN" ]]; then
         armv7l)  XRAY_ARCH="Xray-linux-arm32-v7a.zip" ;;
         *)       error "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
-    LATEST_URL=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep "browser_download_url.*${XRAY_ARCH}" | cut -d '"' -f 4)
+    RELEASE_JSON=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest)
+    if echo "$RELEASE_JSON" | grep -q '"message": *"API rate limit exceeded'; then
+        error "GitHub API rate limit exceeded while looking up xray-core releases."
+        echo "Set GITHUB_TOKEN (or GH_TOKEN) in the environment to authenticate and raise the limit, then retry."
+        exit 1
+    fi
+    LATEST_URL=$(echo "$RELEASE_JSON" \
+        | grep "\"browser_download_url\":" \
+        | grep "${XRAY_ARCH}\"" \
+        | head -n1 \
+        | cut -d '"' -f 4)
     if [[ -z "$LATEST_URL" ]]; then
         error "Failed to find xray-core download URL for $ARCH"
         exit 1
