@@ -200,8 +200,8 @@ if [[ -z "$KEYS" ]]; then
     error "Failed to generate x25519 keys with xray binary."
     exit 1
 fi
-PRIVATE_KEY=$(echo "$KEYS" | grep -E "^(Private key|PrivateKey):" | awk '{print $NF}')
-PUBLIC_KEY=$(echo "$KEYS" | grep -E "^(Public key|Password):" | awk '{print $NF}')
+PRIVATE_KEY=$(echo "$KEYS" | grep -E "^(PrivateKey):" | awk '{print $NF}')
+PUBLIC_KEY=$(echo "$KEYS" | grep -E "(\(PublicKey\)):" | awk '{print $NF}')
 
 if [[ -z "$PRIVATE_KEY" || -z "$PUBLIC_KEY" ]]; then
     error "Failed to parse x25519 keys."
