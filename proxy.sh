@@ -75,33 +75,21 @@ if [[ ! -x "$XRAY_BIN" ]]; then
 fi
 
 # ─── Install ngrok ─────────────────────────────────────────────────────────
-NGROK_SYSTEM=""
-if command -v ngrok &>/dev/null; then NGROK_SYSTEM=$(command -v ngrok); fi
-
-if [[ -n "${NGROK_SYSTEM}" && -x "${NGROK_SYSTEM}" ]]; then
-    NGROK_BIN="${NGROK_SYSTEM}"
+if command -v ngrok &>/dev/null; then
+    NGROK_BIN=$(command -v ngrok)
     log "Using system ngrok: ${NGROK_BIN}"
 else
-    log "Downloading ngrok..."
-    # Try multiple mirrors -- the equinox CDN is the official source
-    for url in \
-        "https://bin.equinox.io/c/bNyjFmdUd9w/ngrok-v3-stable-linux-amd64.tgz" \
-        "https://ngrok-agent.s3.amazonaws.com/ngrok-v3-stable-linux-amd64.tgz"; do
-        if curl -fsSL --max-time 30 -o ngrok.tgz "$url" 2>/dev/null; then
-            if file ngrok.tgz | grep -qi gzip; then
-                tar -xzf ngrok.tgz ngrok 2>/dev/null && chmod +x ngrok && rm -f ngrok.tgz && {
-                    NGROK_BIN="${PWD}/ngrok"
-                    log "ngrok downloaded."
-                    break
-                }
-            fi
-        fi
-        rm -f ngrok.tgz
-    done
-    if [[ ! -x "$NGROK_BIN" ]]; then
-        error "Could not download ngrok. Please install manually: https://ngrok.com/download"
+    log "Installing ngrok via apt..."
+    curl -fsSL "https://ngrok-agent.s3.amazonaws.com/ngrok.asc" | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+    echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+    sudo apt-get update -qq
+    sudo apt-get install -y ngrok
+    NGROK_BIN=$(command -v ngrok)
+    if [[ -z "${NGROK_BIN}" ]]; then
+        error "ngrok installation via apt failed. Please install manually."
         exit 1
     fi
+    log "ngrok installed via apt."
 fi
 
 [[ -z "${NGROK_AUTHTOKEN:-}" ]] && { error "Set NGROK_AUTHTOKEN"; exit 1; }
