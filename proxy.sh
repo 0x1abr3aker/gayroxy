@@ -119,38 +119,84 @@ if [[ -z "$CLOUDFLARED_BIN" ]]; then
 fi
 
 # WARP from pkg.cloudflareclient.com
+WARP_ACTIVE=false
 WARP_BIN=""
+
 if command -v warp-cli &>/dev/null; then
     WARP_BIN=$(command -v warp-cli)
     log "Using system warp-cli"
 else
     log "Installing Cloudflare WARP..."
-    curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-    sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
+    curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
+        || warn "Failed to add WARP GPG key"
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
+        | sudo tee /etc/apt/sources.list.d/cloudflare-client.list >/dev/null || true
+    sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp 2>&1 | tail -3
     WARP_BIN=$(command -v warp-cli)
 fi
-# Start the WARP daemon (needed for warp-cli commands)
-sudo systemctl start warp-svc 2>/dev/null || true
-sleep 1
-# Register (first time generates anon device ID, subsequent calls are no-op)
-$WARP_BIN register >/dev/null 2>&1 || true
-$WARP_BIN set-mode proxy >/dev/null 2>&1 || true
-$WARP_BIN connect >/dev/null 2>&1 || true
-sleep 2
-# Surface WARP status (so users can see if it's actually connected)
-$WARP_BIN status 2>/dev/null | head -5 || warn "WARP status check failed"
-# Probe WARP SOCKS5 to see if it actually routes traffic
-WARP_ACTIVE=false
-if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
-    if curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q 'warp='; then
-        WARP_ACTIVE=true
-        log "WARP ✓ — Reddit traffic routes through consumer IPs"
-    else
-        warn "WARP SOCKS5 port open but not routing traffic — Reddit stealth disabled"
-    fi
+
+if [[ -z "$WARP_BIN" ]]; then
+    warn "warp-cli not found — skipping WARP (Reddit stealth unavailable)"
 else
-    warn "WARP SOCKS5 proxy not listening on port ${WARP_PORT} — Reddit stealth disabled"
+    # Start the daemon and wait for it to be ready
+    WARP_SVC_OK=$(sudo systemctl start warp-svc 2>&1) && sleep 2 || warn "warp-svc: $WARP_SVC_OK"
+    if pgrep -x warp-svc >/dev/null 2>&1; then
+        log "warp-svc daemon running"
+    else
+        # Try direct launch as fallback
+        sudo warp-svc --daemonize >/dev/null 2>&1 && sleep 2 || true
+        pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running — WARP may fail"
+    fi
+
+    # Register device (anonymous, no auth needed). Try new syntax first.
+    WARP_REG=$(sudo $WARP_BIN registration new 2>&1) \
+        || WARP_REG=$(sudo $WARP_BIN register 2>&1) \
+        || true
+    if echo "$WARP_REG" | grep -qi 'error\|failed\|already'; then
+        # Already registered is fine — just a warning
+        echo "$WARP_REG" | grep -qi 'already' && log "WARP already registered" \
+            || warn "WARP register: $(echo "$WARP_REG" | head -1)"
+    else
+        log "WARP registered"
+    fi
+
+    # Set proxy mode (try new syntax first)
+    sudo $WARP_BIN mode proxy 2>/dev/null || sudo $WARP_BIN set-mode proxy 2>/dev/null || \
+        warn "warp-cli set-mode failed"
+
+    # Connect to WARP
+    WARP_CONN=$(sudo $WARP_BIN connect 2>&1) || true
+    echo "$WARP_CONN" | grep -qi 'error' && warn "WARP connect: $WARP_CONN"
+    sleep 3
+
+    # Verify WARP SOCKS5 proxy is actually routing traffic
+    if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
+        log "WARP SOCKS5 listening on :40000"
+        for try in 1 2; do
+            WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
+            if echo "$WARP_CHECK" | grep -q 'warp='; then
+                WARP_ACTIVE=true
+                log "WARP ✓ — routing through consumer IPs"
+                break
+            fi
+            sleep 2
+            # Retry: disconnect and reconnect
+            sudo $WARP_BIN disconnect >/dev/null 2>&1 || true
+            sleep 1
+            sudo $WARP_BIN connect >/dev/null 2>&1 || true
+            sleep 3
+        done
+    else
+        warn "WARP SOCKS5 port 40000 not found — checking for alternative ports..."
+        ss -tlnp 2>/dev/null | grep -i warp || true
+    fi
+
+    # Show final WARP status for debugging
+    sudo $WARP_BIN status 2>/dev/null | head -5 || warn "warp-cli status failed"
+
+    if [[ "$WARP_ACTIVE" != "true" ]]; then
+        warn "WARP not active — Reddit blocking may persist"
+    fi
 fi
 
 # ─── Generate credentials ────────────────────────────────────────────────────
