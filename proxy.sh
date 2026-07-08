@@ -198,7 +198,7 @@ cat > "$XRAY_CONFIG_FILE" <<JSON
       "listen": "127.0.0.1",
       "port": ${PORT_VLESS_GRPC},
       "protocol": "vless",
-      "settings": {"clients": [{"id": "${UUID_VLESS_GRPC}", "decryption": "none"}]},
+      "settings": {"clients": [{"id": "${UUID_VLESS_GRPC}"}], "decryption": "none"},
       "streamSettings": {
         "network": "grpc",
         "security": "none",
@@ -229,7 +229,7 @@ cat > "$XRAY_CONFIG_FILE" <<JSON
       "listen": "127.0.0.1",
       "port": ${PORT_REALITY},
       "protocol": "vless",
-      "settings": {"clients": [{"id": "${UUID_REALITY}"}]},
+      "settings": {"clients": [{"id": "${UUID_REALITY}"}], "decryption": "none"},
       "streamSettings": {
         "network": "tcp",
         "security": "reality",
