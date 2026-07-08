@@ -60,7 +60,10 @@ jobs:
             PORT_TROJAN_GRPC=10006 GRPC_SERVICE_TROJAN=svc2 \
             PORT_SHADOWSOCKS=10007 SS_PASS=sspass \
             PORT_REALITY=10008 UUID_REALITY=test-reality REALITY_PRIVATE=priv REALITY_PUBLIC=pub SHORT_ID=abcd \
-            PORT_SOCKS5=10009 PORT_HTTP_PROXY=10010
+            PORT_SOCKS5=10009 PORT_HTTP_PROXY=10010 \
+            PORT_SS_WS=10011 PORT_SS_GRPC=10012 PORT_VMESS_GRPC=10013 \
+            PATH_SS_WS=/ss-ws PATH_SS_GRPC=/ss-grpc PATH_VMESS_GRPC=/vmess-grpc \
+            GRPC_SERVICE_SS=ss-svc GRPC_SERVICE_VMESS=vmess-svc
           envsubst < templates/config.json.tmpl | python3 -m json.tool > /dev/null
           echo "✅ xray template renders valid JSON"
 
@@ -69,9 +72,11 @@ jobs:
           export XRAY_DIR=/tmp LOG_DIR=/tmp PORT_NGINX=9000 SUB_DIR=/tmp/sub \
             PATH_VLESS=/vless PATH_TROJAN=/trojan PATH_VMESS=/vmess \
             PATH_VLESS_GRPC=/vless-grpc PATH_TROJAN_GRPC=/trojan-grpc \
+            PATH_SS_WS=/ss-ws PATH_SS_GRPC=/ss-grpc PATH_VMESS_GRPC=/vmess-grpc \
             PORT_VLESS=10001 PORT_TROJAN=10002 PORT_VMESS=10003 \
-            PORT_VLESS_GRPC=10005 PORT_TROJAN_GRPC=10006
-          NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC'
+            PORT_VLESS_GRPC=10005 PORT_TROJAN_GRPC=10006 \
+            PORT_SS_WS=10011 PORT_SS_GRPC=10012 PORT_VMESS_GRPC=10013
+          NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC $PATH_SS_WS $PORT_SS_WS $PATH_SS_GRPC $PORT_SS_GRPC $PATH_VMESS_GRPC $PORT_VMESS_GRPC'
           OUTPUT=$(envsubst "$NGINX_VARS" < templates/nginx.conf.tmpl)
           echo "$OUTPUT" | grep -q '\$http_upgrade' && echo "✅ nginx $http_upgrade preserved"
           echo "$OUTPUT" | grep -q '\$connection_upgrade' && echo "✅ nginx $connection_upgrade preserved"
@@ -86,7 +91,7 @@ jobs:
           envsubst '$DOMAIN' < templates/index.html.tmpl | grep -q "$DOMAIN"
           echo "✅ index.html template renders"
           # Panel needs all vars
-          export DOMAIN=test.example.com SUB_B64=dGVzdA== VLESS_URL=vless://test TROJAN_URL=trojan://test VMESS_URL=vmess://test VLESS_GRPC_URL=vless+grpc TROJAN_GRPC_URL=trojan+grpc SS_URL=ss://test REALITY_URL=vless+reality SOCKS5_URL=socks5://test HTTP_URL=http://test UUID_VLESS=uid1 PATH_VLESS=/p1 TROJAN_PASS=pass123 PATH_TROJAN=/p2 UUID_VMESS=uid2 PATH_VMESS=/p3 UUID_VLESS_GRPC=uid3 GRPC_SERVICE_VLESS=svc1 GRPC_SERVICE_TROJAN=svc2 SS_PASS=secret PORT_SHADOWSOCKS=10007 UUID_REALITY=uid4 REALITY_PUBLIC=pub PORT_REALITY=10008 PORT_SOCKS5=10009 PORT_HTTP_PROXY=10010
+          export DOMAIN=test.example.com SUB_B64=dGVzdA== VLESS_URL=vless://test TROJAN_URL=trojan://test VMESS_URL=vmess://test VLESS_GRPC_URL=vless+grpc TROJAN_GRPC_URL=trojan+grpc SS_URL=ss://test REALITY_URL=vless+reality SOCKS5_URL=socks5://test HTTP_URL=http://test UUID_VLESS=uid1 PATH_VLESS=/p1 TROJAN_PASS=pass123 PATH_TROJAN=/p2 UUID_VMESS=uid2 PATH_VMESS=/p3 UUID_VLESS_GRPC=uid3 GRPC_SERVICE_VLESS=svc1 GRPC_SERVICE_TROJAN=svc2 SS_PASS=secret PORT_SHADOWSOCKS=10007 UUID_REALITY=uid4 REALITY_PUBLIC=pub PORT_REALITY=10008 PORT_SOCKS5=10009 PORT_HTTP_PROXY=10010 SS_WS_URL=ss+ws://test SS_GRPC_URL=ss+grpc://test VMESS_GRPC_URL=vmess+grpc://test PATH_SS_WS=/ss-ws PATH_SS_GRPC=/ss-grpc PATH_VMESS_GRPC=/vmess-grpc GRPC_SERVICE_SS=ss-svc GRPC_SERVICE_VMESS=vmess-svc PORT_SS_WS=10011 PORT_SS_GRPC=10012 PORT_VMESS_GRPC=10013 SERVER_IP=1.2.3.4 REALITY_DIRECT_URL=vless+reality+direct
           envsubst < templates/panel.html.tmpl | grep -q "$DOMAIN"
           echo "✅ panel.html template renders"
 

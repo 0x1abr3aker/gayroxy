@@ -20,6 +20,9 @@ PORT_SHADOWSOCKS=10007
 PORT_REALITY=10008
 PORT_SOCKS5=10009
 PORT_HTTP_PROXY=10010
+PORT_SS_WS=10011
+PORT_SS_GRPC=10012
+PORT_VMESS_GRPC=10013
 
 # Cloudflare variables (must be set as env vars)
 : "${CF_AUTHTOKEN:?Set CF_AUTHTOKEN}"
@@ -164,10 +167,18 @@ SHORT_ID=$(derive_hex short-id 8)
 PATH_VLESS="/$(derive_hex path/vless 16)"
 PATH_TROJAN="/$(derive_hex path/trojan 16)"
 PATH_VMESS="/$(derive_hex path/vmess 16)"
-PATH_VLESS_GRPC="/vless-grpc-$(derive_hex path/vless-grpc 16)"
-PATH_TROJAN_GRPC="/trojan-grpc-$(derive_hex path/trojan-grpc 16)"
 GRPC_SERVICE_VLESS=$(derive_hex grpc/vless 16)
 GRPC_SERVICE_TROJAN=$(derive_hex grpc/trojan 16)
+# gRPC nginx locations must match serviceName for gRPC routing to work
+PATH_VLESS_GRPC="/${GRPC_SERVICE_VLESS}"
+PATH_TROJAN_GRPC="/${GRPC_SERVICE_TROJAN}"
+
+# New external protocols (WS/gRPC through nginx/Cloudflare)
+PATH_SS_WS="/$(derive_hex path/ss-ws 16)"
+GRPC_SERVICE_SS=$(derive_hex grpc/ss 16)
+PATH_SS_GRPC="/${GRPC_SERVICE_SS}"
+GRPC_SERVICE_VMESS=$(derive_hex grpc/vmess 16)
+PATH_VMESS_GRPC="/${GRPC_SERVICE_VMESS}"
 
 # ─── Export vars for envsubst & render configs ──────────────────────────────
 log "Rendering config files from templates..."
@@ -177,16 +188,19 @@ export XRAY_LOG="${LOG_DIR}/xray.log" \
   XRAY_DIR LOG_DIR SUB_DIR PORT_NGINX \
   PORT_VLESS PORT_TROJAN PORT_VMESS PORT_VLESS_GRPC PORT_TROJAN_GRPC \
   PORT_SHADOWSOCKS PORT_REALITY PORT_SOCKS5 PORT_HTTP_PROXY \
+  PORT_SS_WS PORT_SS_GRPC PORT_VMESS_GRPC \
   UUID_VLESS UUID_VLESS_GRPC UUID_VMESS UUID_REALITY \
   TROJAN_PASS SS_PASS \
   PATH_VLESS PATH_TROJAN PATH_VMESS PATH_VLESS_GRPC PATH_TROJAN_GRPC \
+  PATH_SS_WS PATH_SS_GRPC PATH_VMESS_GRPC \
   GRPC_SERVICE_VLESS GRPC_SERVICE_TROJAN \
+  GRPC_SERVICE_SS GRPC_SERVICE_VMESS \
   REALITY_PRIVATE REALITY_PUBLIC SHORT_ID
 
 envsubst < templates/config.json.tmpl > "$XRAY_CONFIG_FILE"
 
 # For nginx: only expand OUR variables, leave nginx's own vars ($http_upgrade, etc.)
-NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC'
+NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC $PATH_SS_WS $PORT_SS_WS $PATH_SS_GRPC $PORT_SS_GRPC $PATH_VMESS_GRPC $PORT_VMESS_GRPC'
 envsubst "$NGINX_VARS" < templates/nginx.conf.tmpl > "$NGINX_CONF"
 
 # ─── Start xray first ────────────────────────────────────────────────────────
@@ -247,6 +261,18 @@ fi
 
 log "Cloudflare tunnel established for domain: ${CF_DOMAIN}"
 
+# ─── Detect server public IP for direct connections ──────────────────────────
+SERVER_IP=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || \
+            curl -s --max-time 5 https://api.ipify.org 2>/dev/null || \
+            curl -s --max-time 5 https://checkip.amazonaws.com 2>/dev/null || \
+            "")
+if [[ -n "$SERVER_IP" ]]; then
+    log "Server public IP: ${SERVER_IP}"
+else
+    SERVER_IP="${CF_DOMAIN}"
+    warn "Could not detect public IP. Using domain for direct URLs."
+fi
+
 # ─── Build subscription URLs ──────────────────────────────────────────────────
 DOMAIN="${CF_DOMAIN}"
 
@@ -267,7 +293,20 @@ TROJAN_GRPC_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=grpc&security=tls&fp
 SS_BASE="$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)"
 SS_URL="ss://${SS_BASE}@127.0.0.1:${PORT_SHADOWSOCKS}#ss-local"
 
-REALITY_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#reality-local"
+REALITY_LOCAL_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#reality-local"
+
+# New external protocols (WS/gRPC through Cloudflare tunnel)
+SS_WS_URL="ss://$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)@${DOMAIN}:443?type=ws&security=tls&path=${PATH_SS_WS}&host=${DOMAIN}#ss-ws"
+SS_GRPC_URL="ss://$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)@${DOMAIN}:443?type=grpc&security=tls&serviceName=${GRPC_SERVICE_SS}&host=${DOMAIN}#ss-grpc"
+
+VMESS_GRPC_JSON="{\"v\":\"2\",\"ps\":\"cf-vmess-grpc\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"grpc\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${GRPC_SERVICE_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
+VMESS_GRPC_URL="vmess://$(echo -n "$VMESS_GRPC_JSON" | base64 -w 0)"
+
+# Direct Reality (stealth — bypasses Cloudflare, connects directly to server)
+REALITY_DIRECT_URL=""
+if [[ -n "$SERVER_IP" ]]; then
+    REALITY_DIRECT_URL="vless://${UUID_REALITY}@${SERVER_IP}:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#reality-direct"
+fi
 
 SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#socks5-local"
 HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#http-proxy-local"
@@ -279,7 +318,11 @@ ${VMESS_URL}
 ${VLESS_GRPC_URL}
 ${TROJAN_GRPC_URL}
 ${SS_URL}
-${REALITY_URL}
+${SS_WS_URL}
+${SS_GRPC_URL}
+${VMESS_GRPC_URL}
+${REALITY_LOCAL_URL}
+${REALITY_DIRECT_URL}
 ${SOCKS5_URL}
 ${HTTP_URL}"
 
@@ -291,12 +334,16 @@ log "Rendering HTML pages..."
 envsubst '$DOMAIN' < templates/index.html.tmpl > "${SUB_DIR}/index.html"
 
 export SUB_B64 VLESS_URL TROJAN_URL VMESS_URL VLESS_GRPC_URL TROJAN_GRPC_URL
-export SS_URL REALITY_URL SOCKS5_URL HTTP_URL
+export SS_URL SS_WS_URL SS_GRPC_URL VMESS_GRPC_URL
+export REALITY_LOCAL_URL REALITY_DIRECT_URL SOCKS5_URL HTTP_URL
 export UUID_VLESS PATH_VLESS TROJAN_PASS PATH_TROJAN UUID_VMESS PATH_VMESS
 export UUID_VLESS_GRPC GRPC_SERVICE_VLESS GRPC_SERVICE_TROJAN
 export SS_PASS PORT_SHADOWSOCKS UUID_REALITY REALITY_PUBLIC PORT_REALITY
+export PATH_SS_WS PATH_SS_GRPC PATH_VMESS_GRPC
+export GRPC_SERVICE_SS GRPC_SERVICE_VMESS
+export PORT_SS_WS PORT_SS_GRPC PORT_VMESS_GRPC
 export PORT_SOCKS5 PORT_HTTP_PROXY
-export DOMAIN
+export DOMAIN SERVER_IP
 
 envsubst < templates/panel.html.tmpl > "${SUB_DIR}/panel.html"
 
@@ -309,6 +356,8 @@ echo ""
 echo -e "  ${MAG}Subscription URL:${NC} https://${DOMAIN}/sub"
 echo -e "  ${MAG}Panel URL:${NC}      https://${DOMAIN}/panel"
 echo ""
+echo "------------------------------------------"
+echo "  🌐 HTTPS Tunnel (via Cloudflare:443)"
 echo "------------------------------------------"
 echo -e "  ${GRN}VLESS + WebSocket + TLS${NC}"
 echo -e "     UUID:  ${UUID_VLESS}"
@@ -326,13 +375,45 @@ echo -e "  ${GRN}VLESS + gRPC + TLS${NC}"
 echo -e "     UUID:  ${UUID_VLESS_GRPC}"
 echo -e "     Svc:   ${GRPC_SERVICE_VLESS}"
 echo ""
-echo -e "  ${GRN}Shadowsocks (local only)${NC}   127.0.0.1:${PORT_SHADOWSOCKS}"
-echo -e "  ${GRN}Reality (local only)${NC}       127.0.0.1:${PORT_REALITY}"
-echo -e "  ${GRN}SOCKS5 (local only)${NC}        127.0.0.1:${PORT_SOCKS5}"
-echo -e "  ${GRN}HTTP proxy (local only)${NC}    127.0.0.1:${PORT_HTTP_PROXY}"
+echo -e "  ${GRN}Trojan + gRPC + TLS${NC}"
+echo -e "     Pass:  ${TROJAN_PASS}"
+echo -e "     Svc:   ${GRPC_SERVICE_TROJAN}"
+echo ""
+echo -e "  ${GRN}Shadowsocks + WebSocket + TLS${NC}"
+echo -e "     Pass:  ${SS_PASS}"
+echo -e "     Path:  ${PATH_SS_WS}"
+echo ""
+echo -e "  ${GRN}Shadowsocks + gRPC + TLS${NC}"
+echo -e "     Pass:  ${SS_PASS}"
+echo -e "     Svc:   ${GRPC_SERVICE_SS}"
+echo ""
+echo -e "  ${GRN}VMess + gRPC + TLS${NC}"
+echo -e "     UUID:  ${UUID_VMESS}"
+echo -e "     Svc:   ${GRPC_SERVICE_VMESS}"
 echo ""
 echo "------------------------------------------"
-echo "  Full VLESS link:"
+echo "  🛡️ Direct (Stealth — bypasses Cloudflare)"
+echo "------------------------------------------"
+if [[ -n "$REALITY_DIRECT_URL" ]]; then
+echo -e "  ${GRN}REALITY (VLESS + XTLS)${NC}"
+echo -e "     UUID:  ${UUID_REALITY}"
+echo -e "     IP:    ${SERVER_IP}:${PORT_REALITY}"
+echo -e "     Pub:   ${REALITY_PUBLIC}"
+echo -e "     URL:   ${REALITY_DIRECT_URL}"
+else
+echo -e "  ${RED}REALITY: Could not detect server IP${NC}"
+fi
+echo ""
+echo "------------------------------------------"
+echo "  🔒 Local Only (127.0.0.1)"
+echo "------------------------------------------"
+echo -e "  ${GRN}Shadowsocks${NC}   127.0.0.1:${PORT_SHADOWSOCKS}"
+echo -e "  ${GRN}REALITY${NC}        127.0.0.1:${PORT_REALITY}"
+echo -e "  ${GRN}SOCKS5${NC}         127.0.0.1:${PORT_SOCKS5}"
+echo -e "  ${GRN}HTTP Proxy${NC}     127.0.0.1:${PORT_HTTP_PROXY}"
+echo ""
+echo "------------------------------------------"
+echo "  Quick links:"
 echo "  ${VLESS_URL}"
 echo ""
 echo "=========================================="

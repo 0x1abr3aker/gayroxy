@@ -69,8 +69,44 @@
       "settings": {"method": "aes-256-gcm", "password": "${SS_PASS}"}
     },
     {
-      "tag": "reality",
+      "tag": "shadowsocks-ws",
       "listen": "127.0.0.1",
+      "port": ${PORT_SS_WS},
+      "protocol": "shadowsocks",
+      "settings": {"method": "aes-256-gcm", "password": "${SS_PASS}"},
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {"path": "${PATH_SS_WS}"}
+      }
+    },
+    {
+      "tag": "shadowsocks-grpc",
+      "listen": "127.0.0.1",
+      "port": ${PORT_SS_GRPC},
+      "protocol": "shadowsocks",
+      "settings": {"method": "aes-256-gcm", "password": "${SS_PASS}"},
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "grpcSettings": {"serviceName": "${GRPC_SERVICE_SS}"}
+      }
+    },
+    {
+      "tag": "vmess-grpc",
+      "listen": "127.0.0.1",
+      "port": ${PORT_VMESS_GRPC},
+      "protocol": "vmess",
+      "settings": {"clients": [{"id": "${UUID_VMESS}", "alterId": 0}]},
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "grpcSettings": {"serviceName": "${GRPC_SERVICE_VMESS}"}
+      }
+    },
+    {
+      "tag": "reality",
+      "listen": "0.0.0.0",
       "port": ${PORT_REALITY},
       "protocol": "vless",
       "settings": {"clients": [{"id": "${UUID_REALITY}"}], "decryption": "none"},

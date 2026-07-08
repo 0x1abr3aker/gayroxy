@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🚀 Proxy Panel</title>
     <style>
-        :root { --bg:#0f0f1a; --card:#1a1a2e; --text:#e0e0ff; --accent:#00d4aa; --accent2:#ff6b6b; --accent3:#4ecdc4; }
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --text:#e0e0ff; --accent:#00d4aa; --accent2:#ff6b6b; --accent3:#4ecdc4; --accent4:#ffd93d; }
         * { margin:0; padding:0; box-sizing:border-box; }
         body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.6; }
         .container { max-width:1200px; margin:0 auto; padding:20px; }
@@ -24,6 +24,7 @@
         .badge.ws { background:#2d5016; color:#7cfc00; }
         .badge.grpc { background:#1a4a5e; color:#00d4ff; }
         .badge.local { background:#5e1a1a; color:#ff6b6b; }
+        .badge.direct { background:#5e3a1a; color:#ffd93d; }
         .details { background:#0a0a14; padding:12px; border-radius:6px; margin:12px 0; font-family:monospace; font-size:13px; word-break:break-all; }
         .details .label { color:#888; font-size:11px; display:block; margin-bottom:4px; }
         .qr-container { text-align:center; margin:15px 0; }
@@ -35,12 +36,17 @@
         .program-section h4 { color:var(--accent2); margin-bottom:10px; border-bottom:1px solid #333; padding-bottom:5px; }
         .url-list { list-style:none; }
         .url-list li { background:#0a0a14; padding:10px; margin:5px 0; border-radius:4px; word-break:break-all; font-family:monospace; font-size:13px; }
-        .sub-box { background:var(--card); padding:20px; border-radius:12px; margin-bottom:30px; text-align:center; }
-        .sub-box h2 { margin-bottom:10px; }
+        .sub-box { background:var(--card); padding:20px; border-radius:12px; margin-bottom:30px; }
+        .sub-box h2 { text-align:center; margin-bottom:10px; }
+        .sub-box .sub-inner { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:20px; }
+        .sub-box .sub-text { flex:1; min-width:280px; }
+        .sub-box .sub-qr { flex:0 0 auto; }
         .sub-url { background:#0a0a14; padding:15px; border-radius:8px; font-family:monospace; word-break:break-all; display:inline-block; max-width:100%; }
         .btn { background:var(--accent3); color:#000; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:bold; margin:5px; }
         .btn:hover { opacity:.9; }
         @media (max-width:600px) { .grid { grid-template-columns:1fr; } h1 { font-size:1.8rem; } }
+        .stealth-note { background:#1a2e1a; border-left:4px solid var(--accent4); padding:12px 16px; border-radius:4px; margin-bottom:20px; font-size:14px; color:#ccc; }
+        .stealth-note strong { color:var(--accent4); }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
@@ -51,18 +57,39 @@
 
     <div class="sub-box">
         <h2>📋 Subscription URL</h2>
-        <div class="sub-url" id="sub-url">https://$DOMAIN/sub</div><br>
-        <button class="btn" onclick="copyToClipboard('https://$DOMAIN/sub')">Copy URL</button>
-        <button class="btn" onclick="copySubB64()">Copy Base64 Sub</button>
+        <div class="sub-inner">
+            <div class="sub-text">
+                <div class="sub-url" id="sub-url">https://$DOMAIN/sub</div><br>
+                <button class="btn" onclick="copyToClipboard('https://$DOMAIN/sub')">Copy URL</button>
+                <button class="btn" onclick="copySubB64()">Copy Base64 Sub</button>
+            </div>
+            <div class="sub-qr" id="sub-qr"></div>
+        </div>
     </div>
 
     <div class="tabs">
         <div class="tab active" onclick="showTab(event,'http')">HTTP Tunnel</div>
+        <div class="tab" onclick="showTab(event,'direct')">Direct</div>
         <div class="tab" onclick="showTab(event,'local')">Local Only</div>
         <div class="tab" onclick="showTab(event,'programs')">Per Program</div>
     </div>
 
-    <div id="sec-http" class="section active"><div class="grid" id="http-grid"></div></div>
+    <div id="sec-http" class="section active">
+        <div class="stealth-note">
+            ⚡ <strong>HTTPS Tunnel via Cloudflare</strong> — These protocols tunnel through Cloudflare (port 443).
+            They work well but may be detected as proxy traffic (<strong>IP lookup sites may detect the VPN</strong>).
+            For stealth, use the <strong>Direct</strong> tab (REALITY protocol bypasses Cloudflare).
+        </div>
+        <div class="grid" id="http-grid"></div>
+    </div>
+    <div id="sec-direct" class="section">
+        <div class="stealth-note">
+            🛡️ <strong>Real Reality™</strong> — Direct connections bypassing Cloudflare.
+            REALITY mimics TLS traffic to a real website (www.cloudflare.com), making it undetectable as a proxy.
+            <br>⚠️ You must be able to connect to the server's IP directly (no firewall blocking port $PORT_REALITY).
+        </div>
+        <div class="grid" id="direct-grid"></div>
+    </div>
     <div id="sec-local" class="section"><div class="grid" id="local-grid"></div></div>
     <div id="sec-programs" class="section"><div id="program-content"></div></div>
 </div>
@@ -71,6 +98,7 @@
 // Data injected by proxy.sh via envsubst
 const DATA = {
     domain: '$DOMAIN',
+    serverIP: '$SERVER_IP',
     subB64: '$SUB_B64',
     links: {
         http: [
@@ -79,10 +107,16 @@ const DATA = {
             {name:'VMess + WebSocket', type:'ws', url: '$VMESS_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS'}},
             {name:'VLESS + gRPC', type:'grpc', url: '$VLESS_GRPC_URL', details:{UUID:'$UUID_VLESS_GRPC', Service:'$GRPC_SERVICE_VLESS'}},
             {name:'Trojan + gRPC', type:'grpc', url: '$TROJAN_GRPC_URL', details:{Password:'$TROJAN_PASS', Service:'$GRPC_SERVICE_TROJAN'}},
+            {name:'Shadowsocks + WebSocket', type:'ws', url: '$SS_WS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Path:'$PATH_SS_WS'}},
+            {name:'Shadowsocks + gRPC', type:'grpc', url: '$SS_GRPC_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Service:'$GRPC_SERVICE_SS'}},
+            {name:'VMess + gRPC', type:'grpc', url: '$VMESS_GRPC_URL', details:{UUID:'$UUID_VMESS', Service:'$GRPC_SERVICE_VMESS'}},
+        ],
+        direct: [
+            {name:'REALITY (VLESS + XTLS)', type:'direct', url: '$REALITY_DIRECT_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY', ServerIP:'$SERVER_IP', Flow:'xtls-rprx-vision', SNI:'www.cloudflare.com'}},
         ],
         local: [
             {name:'Shadowsocks', type:'local', url: '$SS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Port:'$PORT_SHADOWSOCKS'}},
-            {name:'Reality (VLESS+XTLS)', type:'local', url: '$REALITY_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY'}},
+            {name:'Reality (VLESS+XTLS)', type:'local', url: '$REALITY_LOCAL_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY'}},
             {name:'SOCKS5 Proxy', type:'local', url: '$SOCKS5_URL', details:{Port:'$PORT_SOCKS5'}},
             {name:'HTTP Proxy', type:'local', url: '$HTTP_URL', details:{Port:'$PORT_HTTP_PROXY'}},
         ]
@@ -111,12 +145,13 @@ function showTab(ev, id) {
 
 function renderCards() {
     for (const [group, items] of Object.entries(DATA.links)) {
-        const grid = document.getElementById(group + '-grid');
+        const gridId = group === 'direct' ? 'direct-grid' : group + '-grid';
+        const grid = document.getElementById(gridId);
         if (!grid) continue;
         items.forEach((item, idx) => {
             const div = document.createElement('div');
             div.className = 'card';
-            const typeClass = item.type === 'ws' ? 'ws' : item.type === 'grpc' ? 'grpc' : 'local';
+            const typeClass = item.type === 'ws' ? 'ws' : item.type === 'grpc' ? 'grpc' : item.type === 'direct' ? 'direct' : 'local';
             div.innerHTML = `
                 <h3>${item.name} <span class="badge ${typeClass}">${item.type.toUpperCase()}</span></h3>
                 <div class="details"><span class="label">Share Link</span>${item.url}</div>
@@ -133,13 +168,20 @@ function renderCards() {
     }
 }
 
+// Render subscription QR code
+setTimeout(() => {
+    try { new QRCode(document.getElementById('sub-qr'), {text: 'https://'+DATA.domain+'/sub', width:160, height:160}); }
+    catch(e) {}
+}, 200);
+
 function buildPrograms() {
     const pc = document.getElementById('program-content');
     const programs = {
-        'NekoBox / Nekoray': () => [DATA.links.http[0], DATA.links.http[1], DATA.links.http[3], DATA.links.http[4]],
-        'V2RayNG / V2RayN': () => [DATA.links.http[0], DATA.links.http[2], DATA.links.http[3]],
+        'NekoBox / Nekoray': () => [DATA.links.http[0], DATA.links.http[1], DATA.links.http[3], DATA.links.http[4], DATA.links.direct[0]],
+        'V2RayNG / V2RayN': () => [DATA.links.http[0], DATA.links.http[2], DATA.links.http[3], DATA.links.http[7]],
         'Shadowrocket': () => DATA.links.http,
         'Streisand / FairVPN': () => [DATA.links.http[0], DATA.links.http[1]],
+        'v2rayN / Qv2ray': () => [DATA.links.http[0], DATA.links.http[2], DATA.links.http[4], DATA.links.http[6], DATA.links.http[7], DATA.links.direct[0]],
     };
     for (const [name, getLinks] of Object.entries(programs)) {
         const links = getLinks();
