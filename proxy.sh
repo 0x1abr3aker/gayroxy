@@ -96,18 +96,21 @@ if [[ ! -x "$XRAY_BIN" ]]; then
     log "xray-core downloaded."
 fi
 
-# ─── Install cloudflared ─────────────────────────────────────────────────────
+# ─── Install Cloudflare tools (cloudflared + WARP) ──────────────────────────
+CLOUDFLARED_BIN=""
 if command -v cloudflared &>/dev/null; then
     CLOUDFLARED_BIN=$(command -v cloudflared)
     log "Using system cloudflared"
-else
+fi
+
+# cloudflared from pkg.cloudflare.com
+if [[ -z "$CLOUDFLARED_BIN" ]]; then
     log "Installing cloudflared..."
     curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
     echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
     sudo apt-get update && sudo apt-get install cloudflared
     CLOUDFLARED_BIN=$(command -v cloudflared)
     if [[ -z "${CLOUDFLARED_BIN}" ]]; then
-        # Fallback: download directly
         curl -L --progress-bar -o cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$(uname -m)"
         chmod +x cloudflared
         CLOUDFLARED_BIN="${PWD}/cloudflared"
@@ -115,22 +118,21 @@ else
     log "cloudflared installed."
 fi
 
-# ─── Install Cloudflare WARP (outbound proxy for consumer IPs) ─────────────
+# WARP from pkg.cloudflareclient.com
+WARP_BIN=""
 if command -v warp-cli &>/dev/null; then
+    WARP_BIN=$(command -v warp-cli)
     log "Using system warp-cli"
 else
     log "Installing Cloudflare WARP..."
-    if [[ ! -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg ]]; then
-        curl -fsSL https://pkg.cloudflareclient.com/cloudflare-warp-gpg.key \
-            | sudo tee /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg >/dev/null
-    fi
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
-        | sudo tee /etc/apt/sources.list.d/cloudflare-warp.list >/dev/null
+    curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
     sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
+    WARP_BIN=$(command -v warp-cli)
 fi
-warp-cli register >/dev/null 2>&1 || true
-warp-cli set-mode proxy >/dev/null 2>&1 || true
-warp-cli connect >/dev/null 2>&1 || true
+$WARP_BIN register >/dev/null 2>&1 || true
+$WARP_BIN set-mode proxy >/dev/null 2>&1 || true
+$WARP_BIN connect >/dev/null 2>&1 || true
 sleep 2
 log "WARP proxy running on 127.0.0.1:${WARP_PORT}"
 
