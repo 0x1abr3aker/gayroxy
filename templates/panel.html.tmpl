@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 Proxy Panel</title>
+    <style>
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --text:#e0e0ff; --accent:#00d4aa; --accent2:#ff6b6b; --accent3:#4ecdc4; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.6; }
+        .container { max-width:1200px; margin:0 auto; padding:20px; }
+        h1 { text-align:center; margin:20px 0; font-size:2.5rem; background:linear-gradient(90deg,var(--accent),var(--accent3)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+        .summary { text-align:center; color:#888; margin-bottom:20px; }
+        .tabs { display:flex; justify-content:center; flex-wrap:wrap; gap:10px; margin-bottom:30px; }
+        .tab { background:var(--card); border:1px solid #333; padding:10px 20px; border-radius:8px; cursor:pointer; transition:all .3s; }
+        .tab:hover, .tab.active { background:var(--accent); color:#000; }
+        .section { display:none; }
+        .section.active { display:block; }
+        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(350px,1fr)); gap:20px; }
+        .card { background:var(--card); border-radius:12px; padding:20px; border:1px solid #2a2a3e; transition:transform .2s; }
+        .card:hover { transform:translateY(-3px); border-color:var(--accent); }
+        .card h3 { color:var(--accent); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+        .badge { display:inline-block; padding:3px 10px; border-radius:4px; font-size:12px; background:#333; margin:5px 5px 0 0; }
+        .badge.ws { background:#2d5016; color:#7cfc00; }
+        .badge.grpc { background:#1a4a5e; color:#00d4ff; }
+        .badge.local { background:#5e1a1a; color:#ff6b6b; }
+        .details { background:#0a0a14; padding:12px; border-radius:6px; margin:12px 0; font-family:monospace; font-size:13px; word-break:break-all; }
+        .details .label { color:#888; font-size:11px; display:block; margin-bottom:4px; }
+        .qr-container { text-align:center; margin:15px 0; }
+        .qr-container canvas { max-width:180px; border-radius:8px; background:#fff; padding:8px; }
+        .copy-btn { background:var(--accent); color:#000; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold; margin-top:8px; transition:opacity .2s; }
+        .copy-btn:hover { opacity:.8; }
+        .copy-btn.copied { background:var(--accent3); }
+        .program-section { margin:20px 0; }
+        .program-section h4 { color:var(--accent2); margin-bottom:10px; border-bottom:1px solid #333; padding-bottom:5px; }
+        .url-list { list-style:none; }
+        .url-list li { background:#0a0a14; padding:10px; margin:5px 0; border-radius:4px; word-break:break-all; font-family:monospace; font-size:13px; }
+        .sub-box { background:var(--card); padding:20px; border-radius:12px; margin-bottom:30px; text-align:center; }
+        .sub-box h2 { margin-bottom:10px; }
+        .sub-url { background:#0a0a14; padding:15px; border-radius:8px; font-family:monospace; word-break:break-all; display:inline-block; max-width:100%; }
+        .btn { background:var(--accent3); color:#000; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:bold; margin:5px; }
+        .btn:hover { opacity:.9; }
+        @media (max-width:600px) { .grid { grid-template-columns:1fr; } h1 { font-size:1.8rem; } }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <h1>🚀 Proxy Panel</h1>
+    <p class="summary">Manage your proxy configurations and subscriptions</p>
+
+    <div class="sub-box">
+        <h2>📋 Subscription URL</h2>
+        <div class="sub-url" id="sub-url">https://$DOMAIN/sub</div><br>
+        <button class="btn" onclick="copyToClipboard('https://$DOMAIN/sub')">Copy URL</button>
+        <button class="btn" onclick="copySubB64()">Copy Base64 Sub</button>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" onclick="showTab(event,'http')">HTTP Tunnel</div>
+        <div class="tab" onclick="showTab(event,'local')">Local Only</div>
+        <div class="tab" onclick="showTab(event,'programs')">Per Program</div>
+    </div>
+
+    <div id="sec-http" class="section active"><div class="grid" id="http-grid"></div></div>
+    <div id="sec-local" class="section"><div class="grid" id="local-grid"></div></div>
+    <div id="sec-programs" class="section"><div id="program-content"></div></div>
+</div>
+
+<script>
+// Data injected by proxy.sh via envsubst
+const DATA = {
+    domain: '$DOMAIN',
+    subB64: '$SUB_B64',
+    links: {
+        http: [
+            {name:'VLESS + WebSocket', type:'ws', url: '$VLESS_URL', details:{UUID:'$UUID_VLESS', Path:'$PATH_VLESS'}},
+            {name:'Trojan + WebSocket', type:'ws', url: '$TROJAN_URL', details:{Password:'$TROJAN_PASS', Path:'$PATH_TROJAN'}},
+            {name:'VMess + WebSocket', type:'ws', url: '$VMESS_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS'}},
+            {name:'VLESS + gRPC', type:'grpc', url: '$VLESS_GRPC_URL', details:{UUID:'$UUID_VLESS_GRPC', Service:'$GRPC_SERVICE_VLESS'}},
+            {name:'Trojan + gRPC', type:'grpc', url: '$TROJAN_GRPC_URL', details:{Password:'$TROJAN_PASS', Service:'$GRPC_SERVICE_TROJAN'}},
+        ],
+        local: [
+            {name:'Shadowsocks', type:'local', url: '$SS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Port:'$PORT_SHADOWSOCKS'}},
+            {name:'Reality (VLESS+XTLS)', type:'local', url: '$REALITY_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY'}},
+            {name:'SOCKS5 Proxy', type:'local', url: '$SOCKS5_URL', details:{Port:'$PORT_SOCKS5'}},
+            {name:'HTTP Proxy', type:'local', url: '$HTTP_URL', details:{Port:'$PORT_HTTP_PROXY'}},
+        ]
+    }
+};
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        if (!btn) return;
+        const old = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 1500);
+    });
+}
+
+function copySubB64() { copyToClipboard(DATA.subB64); }
+
+function showTab(ev, id) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    ev.currentTarget.classList.add('active');
+    document.getElementById('sec-' + id).classList.add('active');
+}
+
+function renderCards() {
+    for (const [group, items] of Object.entries(DATA.links)) {
+        const grid = document.getElementById(group + '-grid');
+        if (!grid) continue;
+        items.forEach((item, idx) => {
+            const div = document.createElement('div');
+            div.className = 'card';
+            const typeClass = item.type === 'ws' ? 'ws' : item.type === 'grpc' ? 'grpc' : 'local';
+            div.innerHTML = `
+                <h3>${item.name} <span class="badge ${typeClass}">${item.type.toUpperCase()}</span></h3>
+                <div class="details"><span class="label">Share Link</span>${item.url}</div>
+                <div class="details"><span class="label">Details</span>${Object.entries(item.details).map(([k,v]) => '<div><b>'+k+':</b> '+v+'</div>').join('')}</div>
+                <div class="qr-container" id="qr-${group}-${idx}"></div>
+                <button class="copy-btn" onclick="copyToClipboard('${item.url.replace(/'/g,"\\'")}')">Copy Link</button>
+            `;
+            grid.appendChild(div);
+            setTimeout(() => {
+                try { new QRCode(document.getElementById('qr-'+group+'-'+idx), {text: item.url, width:180, height:180}); }
+                catch(e) { /* QR library not loaded */ }
+            }, 200);
+        });
+    }
+}
+
+function buildPrograms() {
+    const pc = document.getElementById('program-content');
+    const programs = {
+        'NekoBox / Nekoray': () => [DATA.links.http[0], DATA.links.http[1], DATA.links.http[3], DATA.links.http[4]],
+        'V2RayNG / V2RayN': () => [DATA.links.http[0], DATA.links.http[2], DATA.links.http[3]],
+        'Shadowrocket': () => DATA.links.http,
+        'Streisand / FairVPN': () => [DATA.links.http[0], DATA.links.http[1]],
+    };
+    for (const [name, getLinks] of Object.entries(programs)) {
+        const links = getLinks();
+        if (!links || !links.length) continue;
+        const div = document.createElement('div');
+        div.className = 'program-section';
+        div.innerHTML = '<h4>📱 ' + name + '</h4><ul class="url-list">' +
+            links.filter(Boolean).map(l => '<li><b>' + l.name + ':</b> <a href="' + l.url + '">' + l.url + '</a></li>').join('') +
+            '</ul>';
+        pc.appendChild(div);
+    }
+}
+
+renderCards();
+buildPrograms();
+</script>
+</body>
+</html>

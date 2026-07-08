@@ -1,0 +1,108 @@
+{
+  "log": {"access": "${XRAY_LOG}", "error": "${XRAY_LOG}"},
+  "inbounds": [
+    {
+      "tag": "vless-ws",
+      "listen": "127.0.0.1",
+      "port": ${PORT_VLESS},
+      "protocol": "vless",
+      "settings": {"clients": [{"id": "${UUID_VLESS}"}], "decryption": "none"},
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {"path": "${PATH_VLESS}"}
+      }
+    },
+    {
+      "tag": "trojan-ws",
+      "listen": "127.0.0.1",
+      "port": ${PORT_TROJAN},
+      "protocol": "trojan",
+      "settings": {"clients": [{"password": "${TROJAN_PASS}"}]},
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {"path": "${PATH_TROJAN}"}
+      }
+    },
+    {
+      "tag": "vmess-ws",
+      "listen": "127.0.0.1",
+      "port": ${PORT_VMESS},
+      "protocol": "vmess",
+      "settings": {"clients": [{"id": "${UUID_VMESS}", "alterId": 0}]},
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {"path": "${PATH_VMESS}"}
+      }
+    },
+    {
+      "tag": "vless-grpc",
+      "listen": "127.0.0.1",
+      "port": ${PORT_VLESS_GRPC},
+      "protocol": "vless",
+      "settings": {"clients": [{"id": "${UUID_VLESS_GRPC}"}], "decryption": "none"},
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "grpcSettings": {"serviceName": "${GRPC_SERVICE_VLESS}"}
+      }
+    },
+    {
+      "tag": "trojan-grpc",
+      "listen": "127.0.0.1",
+      "port": ${PORT_TROJAN_GRPC},
+      "protocol": "trojan",
+      "settings": {"clients": [{"password": "${TROJAN_PASS}"}]},
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "grpcSettings": {"serviceName": "${GRPC_SERVICE_TROJAN}"}
+      }
+    },
+    {
+      "tag": "shadowsocks",
+      "listen": "127.0.0.1",
+      "port": ${PORT_SHADOWSOCKS},
+      "protocol": "shadowsocks",
+      "settings": {"method": "aes-256-gcm", "password": "${SS_PASS}"}
+    },
+    {
+      "tag": "reality",
+      "listen": "127.0.0.1",
+      "port": ${PORT_REALITY},
+      "protocol": "vless",
+      "settings": {"clients": [{"id": "${UUID_REALITY}"}], "decryption": "none"},
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "www.cloudflare.com:443",
+          "serverNames": ["www.cloudflare.com"],
+          "privateKey": "${REALITY_PRIVATE}",
+          "publicKey": "${REALITY_PUBLIC}",
+          "shortIds": ["${SHORT_ID}"]
+        }
+      }
+    },
+    {
+      "tag": "socks5",
+      "listen": "127.0.0.1",
+      "port": ${PORT_SOCKS5},
+      "protocol": "socks",
+      "settings": {"auth": "noauth"}
+    },
+    {
+      "tag": "http-proxy",
+      "listen": "127.0.0.1",
+      "port": ${PORT_HTTP_PROXY},
+      "protocol": "http",
+      "settings": {}
+    }
+  ],
+  "outbounds": [
+    {"protocol": "freedom", "settings": {}, "tag": "direct"}
+  ]
+}

@@ -7,7 +7,6 @@ XRAY_CONFIG_FILE="${XRAY_DIR}/config.json"
 XRAY_BIN="${XRAY_DIR}/xray"
 NGINX_CONF="${XRAY_DIR}/nginx.conf"
 SUB_DIR="${XRAY_DIR}/sub"
-XRAY_LOG="${XRAY_DIR}/xray.log"
 LOG_DIR="${XRAY_DIR}/logs"
 
 # Ports (local only)
@@ -22,54 +21,39 @@ PORT_REALITY=10008
 PORT_SOCKS5=10009
 PORT_HTTP_PROXY=10010
 
-# ─── Colors ──────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GRN='\033[0;32m'
-YEL='\033[1;33m'
-CYAN='\033[0;36m'
-MAG='\033[0;35m'
-NC='\033[0m'
+# Cloudflare variables (must be set as env vars)
+: "${CF_AUTHTOKEN:?Set CF_AUTHTOKEN}"
+: "${CF_DOMAIN:?Set CF_DOMAIN (e.g. proxy.example.com)}"
 
+# ─── Colors ──────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GRN='\033[0;32m'; YEL='\033[1;33m'; BLU='\033[0;34m'
+CYAN='\033[0;36m'; MAG='\033[0;35m'; NC='\033[0m'
 log()   { echo -e "${GRN}[proxy.sh]${NC} $1"; }
 warn()  { echo -e "${YEL}[proxy.sh] WARNING${NC} $1"; }
 error() { echo -e "${RED}[proxy.sh] ERROR${NC} $1"; }
-info()  { echo -e "${CYAN}[proxy.sh]${NC} $1"; }
 
-help_msg() {
-    cat <<'EOF'
+help_msg() { cat <<'EOF'
 Usage: CF_AUTHTOKEN=xxx CF_DOMAIN=proxy.example.com ./proxy.sh
-
-  CF_AUTHTOKEN  Cloudflare Tunnel token (from the Zero Trust dashboard,
-                or `cloudflared tunnel token <name>`)
-  CF_DOMAIN     Public hostname already routed to that tunnel
-                (e.g. proxy.example.com)
 EOF
 }
 for arg in "$@"; do case "$arg" in -h|--help) help_msg; exit 0;; esac; done
 
-# ─── Validate required env vars early ───────────────────────────────────────
-[[ -z "${CF_AUTHTOKEN:-}" ]] && { error "Set CF_AUTHTOKEN"; help_msg; exit 1; }
-[[ -z "${CF_DOMAIN:-}" ]]    && { error "Set CF_DOMAIN (e.g. proxy.example.com)"; help_msg; exit 1; }
-
 # ─── PID tracking + cleanup (registered early so any failure cleans up) ─────
-XRAY_PID=""
-CLOUDFLARED_PID=""
-
+XRAY_PID=""; CLOUDFLARED_PID=""
 cleanup() {
     log "Stopping services..."
-    [[ -f "${XRAY_DIR}/nginx.pid" ]] && nginx -c "${NGINX_CONF}" -p "${XRAY_DIR}" -s stop 2>/dev/null || true
-    [[ -n "${CLOUDFLARED_PID}" ]] && kill "${CLOUDFLARED_PID}" 2>/dev/null || true
-    [[ -n "${XRAY_PID}" ]] && kill "${XRAY_PID}" 2>/dev/null || true
-    [[ -n "${CLOUDFLARED_PID}" ]] && wait "${CLOUDFLARED_PID}" 2>/dev/null || true
-    [[ -n "${XRAY_PID}" ]] && wait "${XRAY_PID}" 2>/dev/null || true
+    [[ -f "${XRAY_DIR}/nginx.pid" ]] && nginx -c "${NGINX_CONF}" -s stop 2>/dev/null || true
+    [[ -n "$CLOUDFLARED_PID" ]] && kill "$CLOUDFLARED_PID" 2>/dev/null || true
+    [[ -n "$XRAY_PID" ]] && kill "$XRAY_PID" 2>/dev/null || true
+    wait 2>/dev/null || true
     log "All services stopped."
 }
 trap cleanup INT TERM EXIT
 
-# ─── Install deps ────────────────────────────────────────────────────────────
+# ─── Install dependencies ────────────────────────────────────────────────────
 log "Checking dependencies..."
 MISSING=()
-for pkg in curl unzip python3 nginx openssl; do command -v "$pkg" &>/dev/null || MISSING+=("$pkg"); done
+for pkg in curl unzip python3 nginx; do command -v "$pkg" &>/dev/null || MISSING+=("$pkg"); done
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     log "Installing: ${MISSING[*]}"
     if command -v apt-get &>/dev/null; then
@@ -83,7 +67,7 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
     fi
 fi
 
-# ─── Install xray-core ─────────────────────────────────────────────────────
+# ─── Install xray-core ──────────────────────────────────────────────────────
 if [[ ! -x "$XRAY_BIN" ]]; then
     log "Downloading xray-core..."
     ARCH=$(uname -m)
@@ -95,7 +79,7 @@ if [[ ! -x "$XRAY_BIN" ]]; then
     esac
     URL=$(curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest \
         | grep -oP '"browser_download_url"\s*:\s*"\K[^"]+' | grep "$XRAY_ZIP" | head -1)
-    if [[ -z "$URL" ]]; then error "Could not find xray-core download."; exit 1; fi
+    [[ -z "$URL" ]] && error "Could not find xray-core download." && exit 1
     curl -L --progress-bar -o xray.zip "$URL"
     unzip -o xray.zip xray >/dev/null 2>&1 || true
     chmod +x xray && rm -f xray.zip
@@ -105,49 +89,46 @@ fi
 # ─── Install cloudflared ─────────────────────────────────────────────────────
 if command -v cloudflared &>/dev/null; then
     CLOUDFLARED_BIN=$(command -v cloudflared)
-    log "Using system cloudflared: ${CLOUDFLARED_BIN}"
+    log "Using system cloudflared"
 else
-    log "Installing cloudflared via apt..."
-    sudo mkdir -p --mode=0755 /usr/share/keyrings
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-    echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq cloudflared
-    CLOUDFLARED_BIN=$(command -v cloudflared || true)
+    log "Installing cloudflared..."
+    curl -fsSL "https://pkg.cloudflare.com/cloudflared.asc" | sudo tee /etc/apt/trusted.gpg.d/cloudflared.asc >/dev/null
+    echo "deb https://pkg.cloudflare.com/cloudflared bookworm main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq cloudflared
+    CLOUDFLARED_BIN=$(command -v cloudflared)
     if [[ -z "${CLOUDFLARED_BIN}" ]]; then
-        error "cloudflared installation via apt failed. Please install manually."
-        exit 1
+        # Fallback: download directly
+        curl -L --progress-bar -o cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$(uname -m)"
+        chmod +x cloudflared
+        CLOUDFLARED_BIN="${PWD}/cloudflared"
     fi
-    log "cloudflared installed via apt."
+    log "cloudflared installed."
 fi
 
 # ─── Generate credentials ────────────────────────────────────────────────────
 log "Generating credentials..."
 UUID_VLESS=$(cat /proc/sys/kernel/random/uuid)
+UUID_TROJAN=$(cat /proc/sys/kernel/random/uuid)
 UUID_VMESS=$(cat /proc/sys/kernel/random/uuid)
 UUID_VLESS_GRPC=$(cat /proc/sys/kernel/random/uuid)
+UUID_TROJAN_GRPC=$(cat /proc/sys/kernel/random/uuid)
+UUID_SHADOWSOCKS=$(cat /proc/sys/kernel/random/uuid)
 UUID_REALITY=$(cat /proc/sys/kernel/random/uuid)
+
 TROJAN_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
 SS_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
 
+# Reality x25519 keypair – run x25519 ONCE so both keys come from the same generation
 REALITY_KEYS=$("$XRAY_BIN" x25519 2>&1) || true
-# Parse robustly: take the last whitespace-separated field on the line
-# containing "private"/"public", case-insensitively, rather than assuming
-# a fixed label format (xray-core has changed this output across versions).
 REALITY_PRIVATE=$(echo "$REALITY_KEYS" | grep -i 'private' | awk '{print $NF}')
 REALITY_PUBLIC=$(echo "$REALITY_KEYS" | grep -i 'public'  | awk '{print $NF}')
-
-# A UUID (or any other placeholder) is NOT a valid X25519 key and Xray will
-# reject it outright, so we fail loudly here instead of silently injecting
-# a broken key that only surfaces as a cryptic error at Xray startup.
 if [[ -z "$REALITY_PRIVATE" || -z "$REALITY_PUBLIC" ]]; then
     error "Failed to parse Reality x25519 keypair from 'xray x25519' output."
-    error "Raw output was:"
-    echo "$REALITY_KEYS" >&2
-    exit 1
+    error "Raw output was:"; echo "$REALITY_KEYS" >&2; exit 1
 fi
 log "Reality x25519 keypair generated."
 
+SHORT_ID=$(openssl rand -hex 4)
 gen_id() { cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr -d '-'; }
 
 PATH_VLESS="/$(gen_id)"
@@ -158,213 +139,31 @@ PATH_TROJAN_GRPC="/trojan-grpc-$(gen_id)"
 GRPC_SERVICE_VLESS="$(gen_id)"
 GRPC_SERVICE_TROJAN="$(gen_id)"
 
-# ─── Write xray config ─────────────────────────────────────────────────────
-log "Writing Xray config..."
+# ─── Export vars for envsubst & render configs ──────────────────────────────
+log "Rendering config files from templates..."
 mkdir -p "$SUB_DIR" "$LOG_DIR"
 
+export XRAY_LOG="${LOG_DIR}/xray.log"
+
 cat > "$XRAY_CONFIG_FILE" <<JSON
-{
-  "log": {"access": "${XRAY_LOG}", "error": "${XRAY_LOG}"},
-  "inbounds": [
-    {
-      "tag": "vless-ws",
-      "listen": "127.0.0.1",
-      "port": ${PORT_VLESS},
-      "protocol": "vless",
-      "settings": {"clients": [{"id": "${UUID_VLESS}"}], "decryption": "none"},
-      "streamSettings": {
-        "network": "ws",
-        "security": "none",
-        "wsSettings": {"path": "${PATH_VLESS}"}
-      }
-    },
-    {
-      "tag": "trojan-ws",
-      "listen": "127.0.0.1",
-      "port": ${PORT_TROJAN},
-      "protocol": "trojan",
-      "settings": {"clients": [{"password": "${TROJAN_PASS}"}]},
-      "streamSettings": {
-        "network": "ws",
-        "security": "none",
-        "wsSettings": {"path": "${PATH_TROJAN}"}
-      }
-    },
-    {
-      "tag": "vmess-ws",
-      "listen": "127.0.0.1",
-      "port": ${PORT_VMESS},
-      "protocol": "vmess",
-      "settings": {"clients": [{"id": "${UUID_VMESS}", "alterId": 0}]},
-      "streamSettings": {
-        "network": "ws",
-        "security": "none",
-        "wsSettings": {"path": "${PATH_VMESS}"}
-      }
-    },
-    {
-      "tag": "vless-grpc",
-      "listen": "127.0.0.1",
-      "port": ${PORT_VLESS_GRPC},
-      "protocol": "vless",
-      "settings": {"clients": [{"id": "${UUID_VLESS_GRPC}"}], "decryption": "none"},
-      "streamSettings": {
-        "network": "grpc",
-        "security": "none",
-        "grpcSettings": {"serviceName": "${GRPC_SERVICE_VLESS}"}
-      }
-    },
-    {
-      "tag": "trojan-grpc",
-      "listen": "127.0.0.1",
-      "port": ${PORT_TROJAN_GRPC},
-      "protocol": "trojan",
-      "settings": {"clients": [{"password": "${TROJAN_PASS}"}]},
-      "streamSettings": {
-        "network": "grpc",
-        "security": "none",
-        "grpcSettings": {"serviceName": "${GRPC_SERVICE_TROJAN}"}
-      }
-    },
-    {
-      "tag": "shadowsocks",
-      "listen": "127.0.0.1",
-      "port": ${PORT_SHADOWSOCKS},
-      "protocol": "shadowsocks",
-      "settings": {"method": "aes-256-gcm", "password": "${SS_PASS}"}
-    },
-    {
-      "tag": "reality",
-      "listen": "127.0.0.1",
-      "port": ${PORT_REALITY},
-      "protocol": "vless",
-      "settings": {"clients": [{"id": "${UUID_REALITY}"}], "decryption": "none"},
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "dest": "www.cloudflare.com:443",
-          "serverNames": ["www.cloudflare.com"],
-          "privateKey": "${REALITY_PRIVATE}",
-          "publicKey": "${REALITY_PUBLIC}",
-          "shortIds": ["$(openssl rand -hex 4)"]
-        }
-      }
-    },
-    {
-      "tag": "socks5",
-      "listen": "127.0.0.1",
-      "port": ${PORT_SOCKS5},
-      "protocol": "socks",
-      "settings": {"auth": "noauth"}
-    },
-    {
-      "tag": "http-proxy",
-      "listen": "127.0.0.1",
-      "port": ${PORT_HTTP_PROXY},
-      "protocol": "http",
-      "settings": {}
-    }
-  ],
-  "outbounds": [
-    {"protocol": "freedom", "settings": {}, "tag": "direct"}
-  ]
-}
+$(envsubst < templates/config.json.tmpl)
 JSON
 
-# ─── Write nginx config ────────────────────────────────────────────────────
-log "Writing nginx config..."
-
-cat > "$NGINX_CONF" <<EOF
-worker_processes 1;
-pid ${XRAY_DIR}/nginx.pid;
-events { worker_connections 1024; }
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    access_log /dev/null;
-    error_log ${LOG_DIR}/nginx-error.log;
-
-    map \$http_upgrade \$connection_upgrade {
-        default upgrade;
-        ''      close;
-    }
-
-    server {
-        listen ${PORT_NGINX};
-        server_name _;
-
-        location /sub {
-            alias ${SUB_DIR}/subscription.b64;
-            default_type text/plain;
-        }
-
-        location ${PATH_VLESS} {
-            proxy_pass http://127.0.0.1:${PORT_VLESS};
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection \$connection_upgrade;
-            proxy_read_timeout 86400;
-            proxy_connect_timeout 86400;
-        }
-
-        location ${PATH_TROJAN} {
-            proxy_pass http://127.0.0.1:${PORT_TROJAN};
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection \$connection_upgrade;
-            proxy_read_timeout 86400;
-            proxy_connect_timeout 86400;
-        }
-
-        location ${PATH_VMESS} {
-            proxy_pass http://127.0.0.1:${PORT_VMESS};
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection \$connection_upgrade;
-            proxy_read_timeout 86400;
-            proxy_connect_timeout 86400;
-        }
-
-        # gRPC locations: grpc_pass only (mixing with proxy_pass is invalid/ambiguous).
-        # Requires nginx built with the gRPC module and HTTP/2 negotiated by the
-        # upstream tunnel; if traffic arrives as plain HTTP/1.1 through cloudflared
-        # these will not work end-to-end without additional h2c handling.
-        location ${PATH_VLESS_GRPC} {
-            grpc_pass grpc://127.0.0.1:${PORT_VLESS_GRPC};
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-        }
-
-        location ${PATH_TROJAN_GRPC} {
-            grpc_pass grpc://127.0.0.1:${PORT_TROJAN_GRPC};
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-        }
-
-        location /panel {
-            root ${SUB_DIR};
-            try_files \$uri /panel.html;
-        }
-
-        location / {
-            root ${SUB_DIR};
-            try_files \$uri /index.html;
-        }
-    }
-}
-EOF
+# For nginx: only expand OUR variables, leave nginx's own vars ($http_upgrade, etc.)
+NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC'
+cat > "$NGINX_CONF" <<NGINX
+$(envsubst "$NGINX_VARS" < templates/nginx.conf.tmpl)
+NGINX
 
 # ─── Start xray first ────────────────────────────────────────────────────────
 log "Starting Xray-core..."
-$XRAY_BIN run -c "$XRAY_CONFIG_FILE" > "${LOG_DIR}/xray-output.log" 2>&1 &
+"$XRAY_BIN" run -c "$XRAY_CONFIG_FILE" > "${LOG_DIR}/xray-output.log" 2>&1 &
 XRAY_PID=$!
 
 sleep 1
 if ! kill -0 "$XRAY_PID" 2>/dev/null; then
     error "Xray failed to start. Logs:"
-    cat "${LOG_DIR}/xray-output.log" 2>/dev/null | tail -n 20 || true
+    tail -n 20 "${LOG_DIR}/xray-output.log" 2>/dev/null || true
     exit 1
 fi
 log "Xray running (PID: $XRAY_PID)"
@@ -414,7 +213,7 @@ fi
 
 log "Cloudflare tunnel established for domain: ${CF_DOMAIN}"
 
-# ─── Build subscription ─────────────────────────────────────────────────────
+# ─── Build subscription URLs ──────────────────────────────────────────────────
 DOMAIN="${CF_DOMAIN}"
 
 ENC_PATH_VLESS=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "${PATH_VLESS}")
@@ -439,6 +238,7 @@ REALITY_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&
 SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#socks5-local"
 HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#http-proxy-local"
 
+# ─── Build subscription file ──────────────────────────────────────────────────
 SUB_CONTENT="${VLESS_URL}
 ${TROJAN_URL}
 ${VMESS_URL}
@@ -449,36 +249,35 @@ ${REALITY_URL}
 ${SOCKS5_URL}
 ${HTTP_URL}"
 
-echo -n "$SUB_CONTENT" | base64 -w 0 > "${SUB_DIR}/subscription.b64"
+SUB_B64=$(echo -n "$SUB_CONTENT" | base64 -w 0)
+echo -n "$SUB_B64" > "${SUB_DIR}/subscription.b64"
 
-# ─── HTML landing page & panel ───────────────────────────────────────────—
+# ─── Render HTML templates (after tunnel — we have the domain & URLs) ────────
+log "Rendering HTML pages..."
 cat > "${SUB_DIR}/index.html" <<HTML
-<!DOCTYPE html>
-<html><head><title>Proxy Subscription</title></head>
-<body>
-<h1>🚀 Proxy Subscription</h1>
-<p>Subscription URL: <code>https://${DOMAIN}/sub</code></p>
-<ul>
-<li>VLESS + WebSocket + TLS</li>
-<li>Trojan + WebSocket + TLS</li>
-<li>VMess + WebSocket + TLS</li>
-<li>VLESS + gRPC + TLS</li>
-<li>Trojan + gRPC + TLS</li>
-<li>Shadowsocks (local)</li>
-<li>Reality (local)</li>
-<li>Socks5 (local)</li>
-<li>HTTP Proxy (local)</li>
-</ul>
-</body></html>
+$(envsubst '$DOMAIN' < templates/index.html.tmpl)
 HTML
 
-# ─── Final output ───────────────────────────────────────────────────────────—
+export SUB_B64 VLESS_URL TROJAN_URL VMESS_URL VLESS_GRPC_URL TROJAN_GRPC_URL
+export SS_URL REALITY_URL SOCKS5_URL HTTP_URL
+export UUID_VLESS PATH_VLESS TROJAN_PASS PATH_TROJAN UUID_VMESS PATH_VMESS
+export UUID_VLESS_GRPC GRPC_SERVICE_VLESS GRPC_SERVICE_TROJAN
+export SS_PASS PORT_SHADOWSOCKS UUID_REALITY REALITY_PUBLIC PORT_REALITY
+export PORT_SOCKS5 PORT_HTTP_PROXY
+export DOMAIN
+
+cat > "${SUB_DIR}/panel.html" <<PANEL
+$(envsubst < templates/panel.html.tmpl)
+PANEL
+
+# ─── Final output ─────────────────────────────────────────────────────────────
 echo ""
 echo "=========================================="
 echo "  🚀 Multi-Protocol Proxy Ready!"
 echo "=========================================="
 echo ""
 echo -e "  ${MAG}Subscription URL:${NC} https://${DOMAIN}/sub"
+echo -e "  ${MAG}Panel URL:${NC}      https://${DOMAIN}/panel"
 echo ""
 echo "------------------------------------------"
 echo -e "  ${GRN}VLESS + WebSocket + TLS${NC}"
