@@ -25,6 +25,9 @@ PORT_HTTP_PROXY=10010
 : "${CF_AUTHTOKEN:?Set CF_AUTHTOKEN}"
 : "${CF_DOMAIN:?Set CF_DOMAIN (e.g. proxy.example.com)}"
 
+# Seed for deterministic credentials — same seed = same UUIDs/passwords every run
+SEED="${SEED:-$CF_AUTHTOKEN}"
+
 # ─── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GRN='\033[0;32m'; YEL='\033[1;33m'; BLU='\033[0;34m'
 CYAN='\033[0;36m'; MAG='\033[0;35m'; NC='\033[0m'
@@ -107,43 +110,76 @@ fi
 
 # ─── Generate credentials ────────────────────────────────────────────────────
 log "Generating credentials..."
-UUID_VLESS=$(cat /proc/sys/kernel/random/uuid)
-UUID_TROJAN=$(cat /proc/sys/kernel/random/uuid)
-UUID_VMESS=$(cat /proc/sys/kernel/random/uuid)
-UUID_VLESS_GRPC=$(cat /proc/sys/kernel/random/uuid)
-UUID_TROJAN_GRPC=$(cat /proc/sys/kernel/random/uuid)
-UUID_SHADOWSOCKS=$(cat /proc/sys/kernel/random/uuid)
-UUID_REALITY=$(cat /proc/sys/kernel/random/uuid)
 
-TROJAN_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
-SS_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
+# Derivation functions (pure shell + openssl — no files, no python, all from SEED)
+hex2bin() { printf "$(echo "$1" | sed 's/\(..\)/\\x\1/g')"; }
 
-# Reality x25519 keypair – run x25519 ONCE so both keys come from the same generation
-REALITY_KEYS=$("$XRAY_BIN" x25519 2>&1) || true
-REALITY_PRIVATE=$(echo "$REALITY_KEYS" | grep -i 'private' | awk '{print $NF}')
-REALITY_PUBLIC=$(echo "$REALITY_KEYS" | grep -i 'public'  | awk '{print $NF}')
-if [[ -z "$REALITY_PRIVATE" || -z "$REALITY_PUBLIC" ]]; then
-    error "Failed to parse Reality x25519 keypair from 'xray x25519' output."
-    error "Raw output was:"; echo "$REALITY_KEYS" >&2; exit 1
-fi
-log "Reality x25519 keypair generated."
+derive_uuid() {
+    local h; h=$(echo -n "${SEED}:$1" | sha256sum | head -c 32)
+    printf '%s-%s-4%s-a%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}"
+}
 
-SHORT_ID=$(openssl rand -hex 4)
-gen_id() { cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr -d '-'; }
+derive_pass() {
+    echo -n "${SEED}:$1" | openssl dgst -sha256 -binary | openssl enc -base64 -A | tr -d '=+/' | cut -c1-16
+}
 
-PATH_VLESS="/$(gen_id)"
-PATH_TROJAN="/$(gen_id)"
-PATH_VMESS="/$(gen_id)"
-PATH_VLESS_GRPC="/vless-grpc-$(gen_id)"
-PATH_TROJAN_GRPC="/trojan-grpc-$(gen_id)"
-GRPC_SERVICE_VLESS="$(gen_id)"
-GRPC_SERVICE_TROJAN="$(gen_id)"
+derive_hex() {
+    echo -n "${SEED}:$1" | sha256sum | head -c "${2:-16}"
+}
+
+derive_x25519() {
+    local priv_hex f_hex l_hex cf cl
+    priv_hex=$(echo -n "${SEED}:$1" | sha256sum | head -c 64)
+    f_hex="${priv_hex:0:2}"; l_hex="${priv_hex:62:2}"
+    cf=$(printf '%02x' $((0x${f_hex} & 248)))
+    cl=$(printf '%02x' $((0x${l_hex} & 127 | 64)))
+    priv_hex="${cf}${priv_hex:2:60}${cl}"
+    local der_hex="302e020100300506032b656e04220420${priv_hex}"
+    # Extract public key DER (~44 bytes SPKI), take last 32 bytes as raw public point
+    local pub_hex
+    pub_hex=$(hex2bin "$der_hex" | openssl pkey -pubout -outform DER 2>/dev/null \
+        | od -A n -t x1 | tr -d ' \n')
+    pub_hex="${pub_hex: -64}"
+    echo "$(hex2bin "$priv_hex" | openssl enc -base64 -A)"
+    echo "$(hex2bin "$pub_hex" | openssl enc -base64 -A)"
+}
+
+# Assign all credentials deterministically from SEED
+UUID_VLESS=$(derive_uuid uuid/vless)
+UUID_TROJAN=$(derive_uuid uuid/trojan)
+UUID_VMESS=$(derive_uuid uuid/vmess)
+UUID_VLESS_GRPC=$(derive_uuid uuid/vless-grpc)
+UUID_TROJAN_GRPC=$(derive_uuid uuid/trojan-grpc)
+UUID_SHADOWSOCKS=$(derive_uuid uuid/shadowsocks)
+UUID_REALITY=$(derive_uuid uuid/reality)
+TROJAN_PASS=$(derive_pass pass/trojan)
+SS_PASS=$(derive_pass pass/ss)
+
+# Reality x25519 (derive_x25519 outputs: line 1=private, line 2=public)
+read -r REALITY_PRIVATE REALITY_PUBLIC <<< "$(derive_x25519 reality/keys | tr '\n' ' ')"
+
+SHORT_ID=$(derive_hex short-id 8)
+PATH_VLESS="/$(derive_hex path/vless 16)"
+PATH_TROJAN="/$(derive_hex path/trojan 16)"
+PATH_VMESS="/$(derive_hex path/vmess 16)"
+PATH_VLESS_GRPC="/vless-grpc-$(derive_hex path/vless-grpc 16)"
+PATH_TROJAN_GRPC="/trojan-grpc-$(derive_hex path/trojan-grpc 16)"
+GRPC_SERVICE_VLESS=$(derive_hex grpc/vless 16)
+GRPC_SERVICE_TROJAN=$(derive_hex grpc/trojan 16)
 
 # ─── Export vars for envsubst & render configs ──────────────────────────────
 log "Rendering config files from templates..."
 mkdir -p "$SUB_DIR" "$LOG_DIR"
 
-export XRAY_LOG="${LOG_DIR}/xray.log"
+export XRAY_LOG="${LOG_DIR}/xray.log" \
+  XRAY_DIR LOG_DIR SUB_DIR PORT_NGINX \
+  PORT_VLESS PORT_TROJAN PORT_VMESS PORT_VLESS_GRPC PORT_TROJAN_GRPC \
+  PORT_SHADOWSOCKS PORT_REALITY PORT_SOCKS5 PORT_HTTP_PROXY \
+  UUID_VLESS UUID_VLESS_GRPC UUID_VMESS UUID_REALITY \
+  TROJAN_PASS SS_PASS \
+  PATH_VLESS PATH_TROJAN PATH_VMESS PATH_VLESS_GRPC PATH_TROJAN_GRPC \
+  GRPC_SERVICE_VLESS GRPC_SERVICE_TROJAN \
+  REALITY_PRIVATE REALITY_PUBLIC SHORT_ID
 
 envsubst < templates/config.json.tmpl > "$XRAY_CONFIG_FILE"
 
@@ -229,7 +265,7 @@ TROJAN_GRPC_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=grpc&security=tls&fp
 SS_BASE="$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)"
 SS_URL="ss://${SS_BASE}@127.0.0.1:${PORT_SHADOWSOCKS}#ss-local"
 
-REALITY_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=$(echo -n "${REALITY_PRIVATE}" | base64 -w 0 | head -c 8)&type=tcp&sni=www.cloudflare.com#reality-local"
+REALITY_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#reality-local"
 
 SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#socks5-local"
 HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#http-proxy-local"
