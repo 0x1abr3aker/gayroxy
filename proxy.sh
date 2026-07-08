@@ -130,11 +130,22 @@ else
     sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
     WARP_BIN=$(command -v warp-cli)
 fi
+# Start the WARP daemon if not running
+sudo systemctl enable warp-svc 2>/dev/null || true
+sudo systemctl start warp-svc 2>/dev/null || true
+sleep 1
+# Register (first time generates anon device ID, subsequent calls are no-op)
 $WARP_BIN register >/dev/null 2>&1 || true
 $WARP_BIN set-mode proxy >/dev/null 2>&1 || true
 $WARP_BIN connect >/dev/null 2>&1 || true
 sleep 2
-log "WARP proxy running on 127.0.0.1:${WARP_PORT}"
+# Surface WARP status (so users can see if it's actually connected)
+$WARP_BIN status 2>/dev/null | head -5 || warn "WARP status check failed"
+if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
+    log "WARP SOCKS5 proxy listening on 127.0.0.1:${WARP_PORT}"
+else
+    warn "WARP SOCKS5 proxy not listening on port ${WARP_PORT} — outbound stealth disabled"
+fi
 
 # ─── Generate credentials ────────────────────────────────────────────────────
 log "Generating credentials..."
