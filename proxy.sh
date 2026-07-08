@@ -145,15 +145,11 @@ mkdir -p "$SUB_DIR" "$LOG_DIR"
 
 export XRAY_LOG="${LOG_DIR}/xray.log"
 
-cat > "$XRAY_CONFIG_FILE" <<JSON
-$(envsubst < templates/config.json.tmpl)
-JSON
+envsubst < templates/config.json.tmpl > "$XRAY_CONFIG_FILE"
 
 # For nginx: only expand OUR variables, leave nginx's own vars ($http_upgrade, etc.)
 NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC'
-cat > "$NGINX_CONF" <<NGINX
-$(envsubst "$NGINX_VARS" < templates/nginx.conf.tmpl)
-NGINX
+envsubst "$NGINX_VARS" < templates/nginx.conf.tmpl > "$NGINX_CONF"
 
 # ─── Start xray first ────────────────────────────────────────────────────────
 log "Starting Xray-core..."
@@ -254,9 +250,7 @@ echo -n "$SUB_B64" > "${SUB_DIR}/subscription.b64"
 
 # ─── Render HTML templates (after tunnel — we have the domain & URLs) ────────
 log "Rendering HTML pages..."
-cat > "${SUB_DIR}/index.html" <<HTML
-$(envsubst '$DOMAIN' < templates/index.html.tmpl)
-HTML
+envsubst '$DOMAIN' < templates/index.html.tmpl > "${SUB_DIR}/index.html"
 
 export SUB_B64 VLESS_URL TROJAN_URL VMESS_URL VLESS_GRPC_URL TROJAN_GRPC_URL
 export SS_URL REALITY_URL SOCKS5_URL HTTP_URL
@@ -266,9 +260,7 @@ export SS_PASS PORT_SHADOWSOCKS UUID_REALITY REALITY_PUBLIC PORT_REALITY
 export PORT_SOCKS5 PORT_HTTP_PROXY
 export DOMAIN
 
-cat > "${SUB_DIR}/panel.html" <<PANEL
-$(envsubst < templates/panel.html.tmpl)
-PANEL
+envsubst < templates/panel.html.tmpl > "${SUB_DIR}/panel.html"
 
 # ─── Final output ─────────────────────────────────────────────────────────────
 echo ""
