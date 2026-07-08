@@ -130,8 +130,7 @@ else
     sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
     WARP_BIN=$(command -v warp-cli)
 fi
-# Start the WARP daemon if not running
-sudo systemctl enable warp-svc 2>/dev/null || true
+# Start the WARP daemon (needed for warp-cli commands)
 sudo systemctl start warp-svc 2>/dev/null || true
 sleep 1
 # Register (first time generates anon device ID, subsequent calls are no-op)
