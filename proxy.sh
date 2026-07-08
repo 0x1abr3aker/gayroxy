@@ -140,8 +140,10 @@ derive_x25519() {
     pub_hex=$(hex2bin "$der_hex" | openssl pkey -pubout -outform DER 2>/dev/null \
         | od -A n -t x1 | tr -d ' \n')
     pub_hex="${pub_hex: -64}"
-    echo "$(hex2bin "$priv_hex" | openssl enc -base64 -A)"
-    echo "$(hex2bin "$pub_hex" | openssl enc -base64 -A)"
+    # xray expects base64url (Go's RawURLEncoding: -_ instead of +/, no padding)
+    local b64url="tr '+/' '-_' | tr -d '='"
+    echo "$(hex2bin "$priv_hex" | openssl enc -base64 -A | eval "$b64url")"
+    echo "$(hex2bin "$pub_hex" | openssl enc -base64 -A | eval "$b64url")"
 }
 
 # Assign all credentials deterministically from SEED
