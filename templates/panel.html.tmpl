@@ -3,126 +3,211 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚀 Proxy Panel</title>
+    <title>🇺🇳 Gayroxy Proxy</title>
     <style>
-        :root { --bg:#0f0f1a; --card:#1a1a2e; --text:#e0e0ff; --accent:#00d4aa; --accent2:#ff6b6b; --accent3:#4ecdc4; --accent4:#ffd93d; }
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --text:#e0e0ff; --accent:#00d4aa; --accent2:#ff6b6b; --accent3:#4ecdc4; --accent4:#ffd93d; --accent5:#a855f7; }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.6; }
+        body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.6; min-height:100vh; }
         .container { max-width:1200px; margin:0 auto; padding:20px; }
-        h1 { text-align:center; margin:20px 0; font-size:2.5rem; background:linear-gradient(90deg,var(--accent),var(--accent3)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-        .summary { text-align:center; color:#888; margin-bottom:20px; }
-        .tabs { display:flex; justify-content:center; flex-wrap:wrap; gap:10px; margin-bottom:30px; }
-        .tab { background:var(--card); border:1px solid #333; padding:10px 20px; border-radius:8px; cursor:pointer; transition:all .3s; }
-        .tab:hover, .tab.active { background:var(--accent); color:#000; }
-        .section { display:none; }
+
+        /* ── Header / Logo ── */
+        .logo { text-align:center; padding:30px 0 0; }
+        .logo h1 { font-size:3rem; font-weight:800; letter-spacing:-1px; background:linear-gradient(135deg,var(--accent),var(--accent3),var(--accent5)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+        .logo .subtitle { color:#666; font-size:14px; letter-spacing:4px; text-transform:uppercase; margin-top:4px; }
+        .logo .flag { font-size:1.5rem; display:block; margin-bottom:4px; }
+        .summary { text-align:center; color:#888; margin-bottom:20px; font-size:14px; }
+
+        /* ── Tabs ── */
+        .tabs { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-bottom:24px; }
+        .tab { background:var(--card); border:1px solid #333; padding:8px 18px; border-radius:8px; cursor:pointer; transition:all .3s; font-size:14px; }
+        .tab:hover, .tab.active { background:var(--accent); color:#000; border-color:var(--accent); }
+        .section { display:none; animation:fadeIn .25s ease; }
         .section.active { display:block; }
-        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(350px,1fr)); gap:20px; }
-        .card { background:var(--card); border-radius:12px; padding:20px; border:1px solid #2a2a3e; transition:transform .2s; }
-        .card:hover { transform:translateY(-3px); border-color:var(--accent); }
-        .card h3 { color:var(--accent); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
-        .badge { display:inline-block; padding:3px 10px; border-radius:4px; font-size:12px; background:#333; margin:5px 5px 0 0; }
-        .badge.ws { background:#2d5016; color:#7cfc00; }
-        .badge.grpc { background:#1a4a5e; color:#00d4ff; }
-        .badge.local { background:#5e1a1a; color:#ff6b6b; }
-        .badge.direct { background:#5e3a1a; color:#ffd93d; }
-        .details { background:#0a0a14; padding:12px; border-radius:6px; margin:12px 0; font-family:monospace; font-size:13px; word-break:break-all; }
-        .details .label { color:#888; font-size:11px; display:block; margin-bottom:4px; }
-        .qr-container { text-align:center; margin:15px 0; }
-        .qr-container canvas { max-width:180px; border-radius:8px; background:#fff; padding:8px; }
-        .copy-btn { background:var(--accent); color:#000; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold; margin-top:8px; transition:opacity .2s; }
-        .copy-btn:hover { opacity:.8; }
-        .copy-btn.copied { background:var(--accent3); }
-        .program-section { margin:20px 0; }
-        .program-section h4 { color:var(--accent2); margin-bottom:10px; border-bottom:1px solid #333; padding-bottom:5px; }
-        .url-list { list-style:none; }
-        .url-list li { background:#0a0a14; padding:10px; margin:5px 0; border-radius:4px; word-break:break-all; font-family:monospace; font-size:13px; }
-        .sub-box { background:var(--card); padding:20px; border-radius:12px; margin-bottom:30px; }
-        .sub-box h2 { text-align:center; margin-bottom:10px; }
-        .sub-box .sub-inner { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:20px; }
-        .sub-box .sub-text { flex:1; min-width:280px; }
+
+        /* ── Subscription Box ── */
+        .sub-box { background:linear-gradient(135deg,var(--card),#1a1a3e); padding:24px; border-radius:16px; margin-bottom:30px; border:1px solid #2a2a4e; }
+        .sub-box h2 { text-align:center; margin-bottom:14px; font-size:1.4rem; color:var(--accent); }
+        .sub-box .sub-inner { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:24px; }
+        .sub-box .sub-text { flex:1; min-width:280px; text-align:center; }
         .sub-box .sub-qr { flex:0 0 auto; }
-        .sub-url { background:#0a0a14; padding:15px; border-radius:8px; font-family:monospace; word-break:break-all; display:inline-block; max-width:100%; }
-        .btn { background:var(--accent3); color:#000; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:bold; margin:5px; }
-        .btn:hover { opacity:.9; }
-        @media (max-width:600px) { .grid { grid-template-columns:1fr; } h1 { font-size:1.8rem; } }
-        .stealth-note { background:#1a2e1a; border-left:4px solid var(--accent4); padding:12px 16px; border-radius:4px; margin-bottom:20px; font-size:14px; color:#ccc; }
+        .sub-url { background:#0a0a14; padding:14px; border-radius:8px; font-family:monospace; word-break:break-all; display:inline-block; max-width:100%; border:1px solid #333; }
+        .btn { background:var(--accent3); color:#000; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:bold; margin:5px; transition:all .2s; }
+        .btn:hover { opacity:.9; transform:translateY(-1px); }
+        .btn.primary { background:var(--accent); }
+        .btn.danger { background:var(--accent2); }
+
+        /* ── Section Headers ── */
+        .section-header { margin:24px 0 12px; padding:10px 18px; background:var(--card); border-radius:10px; border-left:4px solid var(--accent); font-weight:700; font-size:17px; display:flex; align-items:center; gap:10px; color:#ddd; }
+        .section-header .count { background:#333; color:#999; font-size:12px; padding:2px 10px; border-radius:12px; font-weight:400; }
+        .stealth-note { background:#1a2e1a; border-left:4px solid var(--accent4); padding:12px 16px; border-radius:8px; margin-bottom:20px; font-size:14px; color:#ccc; }
         .stealth-note strong { color:var(--accent4); }
+
+        /* ── Grid / Cards ── */
+        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:16px; margin-bottom:8px; }
+        .card { background:var(--card); border-radius:14px; padding:20px; border:1px solid #2a2a3e; transition:all .25s; }
+        .card:hover { transform:translateY(-4px); border-color:var(--accent); box-shadow:0 8px 30px rgba(0,212,170,.08); }
+        .card h3 { font-size:15px; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .card h3 .proto-name { color:var(--text); }
+        .badge { display:inline-block; padding:3px 10px; border-radius:5px; font-size:11px; font-weight:600; background:#333; margin:2px 2px 0 0; letter-spacing:.5px; }
+        .badge.ws { background:#1a3a1a; color:#7cfc00; }
+        .badge.grpc { background:#1a2a4a; color:#60a5fa; }
+        .badge.hu { background:#2a1a4a; color:#c084fc; }
+        .badge.direct { background:#3a2a1a; color:#fbbf24; }
+        .badge.local { background:#3a1a1a; color:#f87171; }
+        .details { background:#0a0a14; padding:10px 14px; border-radius:8px; margin:10px 0; font-family:monospace; font-size:13px; word-break:break-all; border:1px solid #1a1a2a; }
+        .details .label { color:#666; font-size:10px; display:block; margin-bottom:3px; text-transform:uppercase; letter-spacing:.5px; }
+        .card-actions { display:flex; gap:8px; margin-top:10px; }
+        .card-actions button { flex:1; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; font-weight:600; font-size:12px; transition:all .2s; }
+        .copy-btn { background:var(--accent); color:#000; }
+        .copy-btn:hover { opacity:.85; }
+        .copy-btn.copied { background:var(--accent3); }
+        .modal-btn { background:#333; color:var(--text); }
+        .modal-btn:hover { background:#444; }
+        .qr-container { text-align:center; margin:12px 0; display:none; }
+        .qr-container canvas { max-width:160px; border-radius:8px; background:#fff; padding:6px; }
+
+        /* ── Modal ── */
+        .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); display:none; align-items:center; justify-content:center; z-index:9999; backdrop-filter:blur(4px); animation:fadeIn .2s ease; }
+        .modal-overlay.open { display:flex; }
+        .modal-content { background:var(--card); border-radius:20px; padding:32px; max-width:440px; width:92%; text-align:center; border:1px solid #333; position:relative; animation:scaleIn .25s ease; max-height:95vh; overflow-y:auto; }
+        .modal-close { position:absolute; top:12px; right:16px; background:none; border:none; color:#888; font-size:26px; cursor:pointer; transition:color .2s; padding:4px; line-height:1; }
+        .modal-close:hover { color:var(--text); }
+        .modal-content h3 { font-size:18px; margin-bottom:8px; }
+        .modal-qr { margin:16px 0; }
+        .modal-qr canvas { max-width:280px; border-radius:14px; background:#fff; padding:16px; }
+        .modal-link { background:#0a0a14; padding:14px; border-radius:10px; word-break:break-all; font-family:monospace; font-size:13px; margin:12px 0; border:1px solid #2a2a3e; text-align:left; }
+        .modal-details { background:#0a0a14; padding:12px 16px; border-radius:8px; margin:12px 0; font-family:monospace; font-size:13px; text-align:left; border:1px solid #1a1a2e; }
+        .modal-details .row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1a1a2a; }
+        .modal-details .row:last-child { border-bottom:none; }
+        .modal-details .row .key { color:#888; }
+        .modal-details .row .val { color:var(--accent); word-break:break-all; text-align:right; max-width:60%; }
+
+        /* ── Program section ── */
+        .program-section { margin:20px 0; }
+        .program-section h4 { color:var(--accent2); margin-bottom:10px; border-bottom:1px solid #333; padding-bottom:8px; font-size:15px; display:flex; align-items:center; gap:8px; }
+        .url-list { list-style:none; }
+        .url-list li { background:#0a0a14; padding:10px 14px; margin:6px 0; border-radius:8px; word-break:break-all; font-family:monospace; font-size:13px; border:1px solid #1a1a2a; }
+        .url-list li a { color:var(--accent3); text-decoration:none; }
+        .url-list li a:hover { text-decoration:underline; }
+
+        /* ── Utilities ── */
+        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+        @keyframes scaleIn { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:scale(1); } }
+        @media (max-width:600px) { .grid { grid-template-columns:1fr; } .logo h1 { font-size:2.2rem; } .modal-content { padding:24px 20px; } }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 <div class="container">
-    <h1>🚀 Proxy Panel</h1>
-    <p class="summary">Manage your proxy configurations and subscriptions</p>
+    <div class="logo">
+        <span class="flag">🇺🇳</span>
+        <h1>Gayroxy</h1>
+        <div class="subtitle">Multi-Protocol Proxy Gateway</div>
+    </div>
+    <p class="summary">Your all-in-one proxy dashboard — pick a protocol, scan, connect.</p>
 
+    <!-- Subscription Box -->
     <div class="sub-box">
-        <h2>📋 Subscription URL</h2>
+        <h2>📋 Subscription</h2>
         <div class="sub-inner">
             <div class="sub-text">
                 <div class="sub-url" id="sub-url">https://$DOMAIN/sub</div><br>
-                <button class="btn" onclick="copyToClipboard('https://$DOMAIN/sub')">Copy URL</button>
-                <button class="btn" onclick="copySubB64()">Copy Base64 Sub</button>
+                <button class="btn primary" onclick="copyToClipboard('https://$DOMAIN/sub')">📋 Copy URL</button>
+                <button class="btn" onclick="copySubB64()">📦 Copy Base64</button>
             </div>
             <div class="sub-qr" id="sub-qr"></div>
         </div>
     </div>
 
+    <!-- Tabs -->
     <div class="tabs">
-        <div class="tab active" onclick="showTab(event,'http')">HTTP Tunnel</div>
-        <div class="tab" onclick="showTab(event,'direct')">Direct</div>
-        <div class="tab" onclick="showTab(event,'local')">Local Only</div>
-        <div class="tab" onclick="showTab(event,'programs')">Per Program</div>
+        <div class="tab active" onclick="showTab(event,'http')">🌐 HTTP Tunnel</div>
+        <div class="tab" onclick="showTab(event,'direct')">🛡️ Direct</div>
+        <div class="tab" onclick="showTab(event,'local')">🔒 Local</div>
+        <div class="tab" onclick="showTab(event,'programs')">📱 Apps</div>
     </div>
 
+    <!-- Tab: HTTP Tunnel -->
     <div id="sec-http" class="section active">
         <div class="stealth-note">
             ⚡ <strong>HTTPS Tunnel via Cloudflare</strong> — These protocols tunnel through Cloudflare (port 443).
-            They work well but may be detected as proxy traffic (<strong>IP lookup sites may detect the VPN</strong>).
-            For stealth, use the <strong>Direct</strong> tab (REALITY protocol bypasses Cloudflare).
+            Convenient but detectable as proxy traffic. For stealth, use the <strong>Direct</strong> tab (REALITY).
         </div>
-        <div class="grid" id="http-grid"></div>
+        <div class="section-header">📡 WebSocket <span class="count" id="ws-count"></span></div>
+        <div class="grid" id="ws-grid"></div>
+        <div class="section-header">🔗 gRPC <span class="count" id="grpc-count"></span></div>
+        <div class="grid" id="grpc-grid"></div>
+        <div class="section-header">⬆️ HTTPUpgrade <span class="count" id="hu-count"></span></div>
+        <div class="grid" id="hu-grid"></div>
     </div>
+
+    <!-- Tab: Direct -->
     <div id="sec-direct" class="section">
         <div class="stealth-note">
-            🛡️ <strong>Real Reality™</strong> — Direct connections bypassing Cloudflare.
-            REALITY mimics TLS traffic to a real website (www.cloudflare.com), making it undetectable as a proxy.
-            <br>⚠️ You must be able to connect to the server's IP directly (no firewall blocking port $PORT_REALITY).
+            🛡️ <strong>REALITY (Stealth)</strong> — Direct connections bypassing Cloudflare.
+            Mimics TLS to cloudflare.com — undetectable. Requires direct port access ($PORT_REALITY not firewalled).
         </div>
         <div class="grid" id="direct-grid"></div>
     </div>
-    <div id="sec-local" class="section"><div class="grid" id="local-grid"></div></div>
+
+    <!-- Tab: Local Only -->
+    <div id="sec-local" class="section">
+        <div class="grid" id="local-grid"></div>
+    </div>
+
+    <!-- Tab: Programs -->
     <div id="sec-programs" class="section"><div id="program-content"></div></div>
 </div>
 
+<!-- Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal-content" id="modal-content">
+        <button class="modal-close" onclick="closeModal()">✕</button>
+        <h3 id="modal-title"></h3>
+        <div class="modal-qr" id="modal-qr"></div>
+        <div class="modal-link" id="modal-link"></div>
+        <div class="modal-details" id="modal-details"></div>
+        <button class="btn primary" onclick="copyFromModal()" id="modal-copy-btn" style="width:100%;margin-top:8px;padding:12px;">📋 Copy Link</button>
+    </div>
+</div>
+
 <script>
-// Data injected by proxy.sh via envsubst
+// ─── Data (injected via envsubst) ──────────────────────────────────────────
 const DATA = {
     domain: '$DOMAIN',
     serverIP: '$SERVER_IP',
     subB64: '$SUB_B64',
     links: {
-        http: [
-            {name:'VLESS + WebSocket', type:'ws', url: '$VLESS_URL', details:{UUID:'$UUID_VLESS', Path:'$PATH_VLESS'}},
-            {name:'Trojan + WebSocket', type:'ws', url: '$TROJAN_URL', details:{Password:'$TROJAN_PASS', Path:'$PATH_TROJAN'}},
-            {name:'VMess + WebSocket', type:'ws', url: '$VMESS_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS'}},
-            {name:'VLESS + gRPC', type:'grpc', url: '$VLESS_GRPC_URL', details:{UUID:'$UUID_VLESS_GRPC', Service:'$GRPC_SERVICE_VLESS'}},
-            {name:'Trojan + gRPC', type:'grpc', url: '$TROJAN_GRPC_URL', details:{Password:'$TROJAN_PASS', Service:'$GRPC_SERVICE_TROJAN'}},
-            {name:'Shadowsocks + WebSocket', type:'ws', url: '$SS_WS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Path:'$PATH_SS_WS'}},
-            {name:'Shadowsocks + gRPC', type:'grpc', url: '$SS_GRPC_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Service:'$GRPC_SERVICE_SS'}},
-            {name:'VMess + gRPC', type:'grpc', url: '$VMESS_GRPC_URL', details:{UUID:'$UUID_VMESS', Service:'$GRPC_SERVICE_VMESS'}},
+        ws: [
+            {name:'Gayroxy · VLESS · WebSocket', url: '$VLESS_URL', details:{UUID:'$UUID_VLESS', Path:'$PATH_VLESS'}},
+            {name:'Gayroxy · Trojan · WebSocket', url: '$TROJAN_URL', details:{Password:'$TROJAN_PASS', Path:'$PATH_TROJAN'}},
+            {name:'Gayroxy · VMess · WebSocket', url: '$VMESS_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS'}},
+            {name:'Gayroxy · Shadowsocks · WebSocket', url: '$SS_WS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Path:'$PATH_SS_WS'}},
+        ],
+        grpc: [
+            {name:'Gayroxy · VLESS · gRPC', url: '$VLESS_GRPC_URL', details:{UUID:'$UUID_VLESS_GRPC', Service:'$GRPC_SERVICE_VLESS'}},
+            {name:'Gayroxy · Trojan · gRPC', url: '$TROJAN_GRPC_URL', details:{Password:'$TROJAN_PASS', Service:'$GRPC_SERVICE_TROJAN'}},
+            {name:'Gayroxy · Shadowsocks · gRPC', url: '$SS_GRPC_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Service:'$GRPC_SERVICE_SS'}},
+            {name:'Gayroxy · VMess · gRPC', url: '$VMESS_GRPC_URL', details:{UUID:'$UUID_VMESS', Service:'$GRPC_SERVICE_VMESS'}},
+        ],
+        hu: [
+            {name:'Gayroxy · VLESS · HTTPUpgrade', url: '$VLESS_HU_URL', details:{UUID:'$UUID_VLESS', Path:'$PATH_VLESS_HU'}},
+            {name:'Gayroxy · Trojan · HTTPUpgrade', url: '$TROJAN_HU_URL', details:{Password:'$TROJAN_PASS', Path:'$PATH_TROJAN_HU'}},
+            {name:'Gayroxy · VMess · HTTPUpgrade', url: '$VMESS_HU_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS_HU'}},
         ],
         direct: [
-            {name:'REALITY (VLESS + XTLS)', type:'direct', url: '$REALITY_DIRECT_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY', ServerIP:'$SERVER_IP', Flow:'xtls-rprx-vision', SNI:'www.cloudflare.com'}},
+            {name:'Gayroxy · REALITY · Direct', url: '$REALITY_DIRECT_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Server:'$SERVER_IP:$PORT_REALITY', Flow:'xtls-rprx-vision', SNI:'www.cloudflare.com'}},
         ],
         local: [
-            {name:'Shadowsocks', type:'local', url: '$SS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Port:'$PORT_SHADOWSOCKS'}},
-            {name:'Reality (VLESS+XTLS)', type:'local', url: '$REALITY_LOCAL_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY'}},
-            {name:'SOCKS5 Proxy', type:'local', url: '$SOCKS5_URL', details:{Port:'$PORT_SOCKS5'}},
-            {name:'HTTP Proxy', type:'local', url: '$HTTP_URL', details:{Port:'$PORT_HTTP_PROXY'}},
+            {name:'Gayroxy · Shadowsocks', url: '$SS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Port:'$PORT_SHADOWSOCKS', Server:'127.0.0.1'}},
+            {name:'Gayroxy · REALITY', url: '$REALITY_LOCAL_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY', Server:'127.0.0.1'}},
+            {name:'Gayroxy · SOCKS5', url: '$SOCKS5_URL', details:{Port:'$PORT_SOCKS5', Server:'127.0.0.1'}},
+            {name:'Gayroxy · HTTP Proxy', url: '$HTTP_URL', details:{Port:'$PORT_HTTP_PROXY', Server:'127.0.0.1'}},
         ]
     }
 };
 
+// ─── Helpers ───────────────────────────────────────────────────────────────
 function copyToClipboard(text) {
     navigator.clipboard.writeText(text).then(() => {
         const btn = event.target;
@@ -143,58 +228,113 @@ function showTab(ev, id) {
     document.getElementById('sec-' + id).classList.add('active');
 }
 
+// ─── Modal ─────────────────────────────────────────────────────────────────
+let modalItem = null;
+
+function openModal(item) {
+    modalItem = item;
+    document.getElementById('modal-title').textContent = item.name;
+    document.getElementById('modal-link').textContent = item.url;
+
+    // Details
+    const detEl = document.getElementById('modal-details');
+    detEl.innerHTML = Object.entries(item.details)
+        .map(([k,v]) => '<div class="row"><span class="key">'+k+'</span><span class="val">'+v+'</span></div>')
+        .join('');
+
+    // QR code
+    const qrEl = document.getElementById('modal-qr');
+    qrEl.innerHTML = '';
+    try { new QRCode(qrEl, {text: item.url, width:280, height:280}); } catch(e) {}
+
+    document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('open');
+}
+
+function copyFromModal() {
+    if (modalItem) copyToClipboard(modalItem.url);
+}
+
+// ─── Render Cards ──────────────────────────────────────────────────────────
+function getBadgeClass(group) {
+    const map = {ws:'ws', grpc:'grpc', hu:'hu', direct:'direct', local:'local'};
+    return map[group] || 'ws';
+}
+
 function renderCards() {
     for (const [group, items] of Object.entries(DATA.links)) {
-        const gridId = group === 'direct' ? 'direct-grid' : group + '-grid';
-        const grid = document.getElementById(gridId);
+        const grid = document.getElementById(group + '-grid');
         if (!grid) continue;
+
+        // Update section header count
+        const countEl = document.getElementById(group + '-count');
+        if (countEl) countEl.textContent = items.length + ' protocol' + (items.length > 1 ? 's' : '');
+
         items.forEach((item, idx) => {
             const div = document.createElement('div');
             div.className = 'card';
-            const typeClass = item.type === 'ws' ? 'ws' : item.type === 'grpc' ? 'grpc' : item.type === 'direct' ? 'direct' : 'local';
             div.innerHTML = `
-                <h3>${item.name} <span class="badge ${typeClass}">${item.type.toUpperCase()}</span></h3>
+                <h3><span class="proto-name">${item.name}</span> <span class="badge ${getBadgeClass(group)}">${group.toUpperCase()}</span></h3>
                 <div class="details"><span class="label">Share Link</span>${item.url}</div>
                 <div class="details"><span class="label">Details</span>${Object.entries(item.details).map(([k,v]) => '<div><b>'+k+':</b> '+v+'</div>').join('')}</div>
-                <div class="qr-container" id="qr-${group}-${idx}"></div>
-                <button class="copy-btn" onclick="copyToClipboard('${item.url.replace(/'/g,"\\'")}')">Copy Link</button>
+                <div class="qr-container" id="qr-${group}-${idx}"><span style="font-size:12px;color:#666;">Loading QR...</span></div>
+                <div class="card-actions">
+                    <button class="copy-btn" onclick="copyToClipboard('${item.url.replace(/'/g,"\\'")}')">📋 Copy</button>
+                    <button class="modal-btn" onclick="openModal(DATA.links['${group}'][${idx}])">🔍 Details</button>
+                </div>
             `;
             grid.appendChild(div);
+
+            // Render QR
             setTimeout(() => {
-                try { new QRCode(document.getElementById('qr-'+group+'-'+idx), {text: item.url, width:180, height:180}); }
-                catch(e) { /* QR library not loaded */ }
-            }, 200);
+                const qrTarget = document.getElementById('qr-'+group+'-'+idx);
+                if (qrTarget) {
+                    qrTarget.innerHTML = '';
+                    try { new QRCode(qrTarget, {text: item.url, width:160, height:160}); } catch(e) { qrTarget.innerHTML = ''; }
+                }
+            }, 300 + idx * 30);
         });
     }
 }
 
-// Render subscription QR code
+// ─── Subscription QR ──────────────────────────────────────────────────────
 setTimeout(() => {
-    try { new QRCode(document.getElementById('sub-qr'), {text: 'https://'+DATA.domain+'/sub', width:160, height:160}); }
-    catch(e) {}
+    try { new QRCode(document.getElementById('sub-qr'), {text: 'https://'+DATA.domain+'/sub', width:160, height:160}); } catch(e) {}
 }, 200);
 
+// ─── Programs ─────────────────────────────────────────────────────────────
 function buildPrograms() {
     const pc = document.getElementById('program-content');
+    const allWS = DATA.links.ws || [];
+    const allGRPC = DATA.links.grpc || [];
+    const allHU = DATA.links.hu || [];
+    const allDirect = DATA.links.direct || [];
+    const allHTTP = [...allWS, ...allGRPC, ...allHU];
+
     const programs = {
-        'NekoBox / Nekoray': () => [DATA.links.http[0], DATA.links.http[1], DATA.links.http[3], DATA.links.http[4], DATA.links.direct[0]],
-        'V2RayNG / V2RayN': () => [DATA.links.http[0], DATA.links.http[2], DATA.links.http[3], DATA.links.http[7]],
-        'Shadowrocket': () => DATA.links.http,
-        'Streisand / FairVPN': () => [DATA.links.http[0], DATA.links.http[1]],
-        'v2rayN / Qv2ray': () => [DATA.links.http[0], DATA.links.http[2], DATA.links.http[4], DATA.links.http[6], DATA.links.http[7], DATA.links.direct[0]],
+        'NekoBox / Nekoray': () => [allWS[0], allWS[1], allGRPC[0], allGRPC[1], allDirect[0]],
+        'V2RayNG / V2RayN': () => [allWS[0], allWS[2], allGRPC[0], allGRPC[3]],
+        'Shadowrocket': () => allHTTP,
+        'Streisand / FairVPN': () => [allWS[0], allWS[1]],
+        'v2rayN / Qv2ray': () => [allWS[0], allWS[2], allGRPC[1], allGRPC[2], allGRPC[3], allDirect[0]],
+        'Sing-Box / SFI': () => [...allHU, ...allGRPC],
     };
     for (const [name, getLinks] of Object.entries(programs)) {
-        const links = getLinks();
-        if (!links || !links.length) continue;
+        const links = getLinks().filter(Boolean);
+        if (!links.length) continue;
         const div = document.createElement('div');
         div.className = 'program-section';
         div.innerHTML = '<h4>📱 ' + name + '</h4><ul class="url-list">' +
-            links.filter(Boolean).map(l => '<li><b>' + l.name + ':</b> <a href="' + l.url + '">' + l.url + '</a></li>').join('') +
+            links.map(l => '<li><b>' + l.name + ':</b> <a href="' + l.url + '">' + l.url + '</a></li>').join('') +
             '</ul>';
         pc.appendChild(div);
     }
 }
 
+// ─── Init ──────────────────────────────────────────────────────────────────
 renderCards();
 buildPrograms();
 </script>

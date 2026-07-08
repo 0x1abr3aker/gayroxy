@@ -23,6 +23,9 @@ PORT_HTTP_PROXY=10010
 PORT_SS_WS=10011
 PORT_SS_GRPC=10012
 PORT_VMESS_GRPC=10013
+PORT_VLESS_HU=10014
+PORT_TROJAN_HU=10015
+PORT_VMESS_HU=10016
 
 # Cloudflare variables (must be set as env vars)
 : "${CF_AUTHTOKEN:?Set CF_AUTHTOKEN}"
@@ -180,6 +183,11 @@ PATH_SS_GRPC="/${GRPC_SERVICE_SS}"
 GRPC_SERVICE_VMESS=$(derive_hex grpc/vmess 16)
 PATH_VMESS_GRPC="/${GRPC_SERVICE_VMESS}"
 
+# HTTPUpgrade protocols (new — simpler than WS, works through nginx/CF)
+PATH_VLESS_HU="/$(derive_hex path/vless-hu 16)"
+PATH_TROJAN_HU="/$(derive_hex path/trojan-hu 16)"
+PATH_VMESS_HU="/$(derive_hex path/vmess-hu 16)"
+
 # ─── Export vars for envsubst & render configs ──────────────────────────────
 log "Rendering config files from templates..."
 mkdir -p "$SUB_DIR" "$LOG_DIR"
@@ -189,10 +197,12 @@ export XRAY_LOG="${LOG_DIR}/xray.log" \
   PORT_VLESS PORT_TROJAN PORT_VMESS PORT_VLESS_GRPC PORT_TROJAN_GRPC \
   PORT_SHADOWSOCKS PORT_REALITY PORT_SOCKS5 PORT_HTTP_PROXY \
   PORT_SS_WS PORT_SS_GRPC PORT_VMESS_GRPC \
+  PORT_VLESS_HU PORT_TROJAN_HU PORT_VMESS_HU \
   UUID_VLESS UUID_VLESS_GRPC UUID_VMESS UUID_REALITY \
   TROJAN_PASS SS_PASS \
   PATH_VLESS PATH_TROJAN PATH_VMESS PATH_VLESS_GRPC PATH_TROJAN_GRPC \
   PATH_SS_WS PATH_SS_GRPC PATH_VMESS_GRPC \
+  PATH_VLESS_HU PATH_TROJAN_HU PATH_VMESS_HU \
   GRPC_SERVICE_VLESS GRPC_SERVICE_TROJAN \
   GRPC_SERVICE_SS GRPC_SERVICE_VMESS \
   REALITY_PRIVATE REALITY_PUBLIC SHORT_ID
@@ -200,7 +210,7 @@ export XRAY_LOG="${LOG_DIR}/xray.log" \
 envsubst < templates/config.json.tmpl > "$XRAY_CONFIG_FILE"
 
 # For nginx: only expand OUR variables, leave nginx's own vars ($http_upgrade, etc.)
-NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC $PATH_SS_WS $PORT_SS_WS $PATH_SS_GRPC $PORT_SS_GRPC $PATH_VMESS_GRPC $PORT_VMESS_GRPC'
+NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC $PATH_SS_WS $PORT_SS_WS $PATH_SS_GRPC $PORT_SS_GRPC $PATH_VMESS_GRPC $PORT_VMESS_GRPC $PATH_VLESS_HU $PORT_VLESS_HU $PATH_TROJAN_HU $PORT_TROJAN_HU $PATH_VMESS_HU $PORT_VMESS_HU'
 envsubst "$NGINX_VARS" < templates/nginx.conf.tmpl > "$NGINX_CONF"
 
 # ─── Start xray first ────────────────────────────────────────────────────────
@@ -279,37 +289,43 @@ DOMAIN="${CF_DOMAIN}"
 ENC_PATH_VLESS=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "${PATH_VLESS}")
 ENC_PATH_TROJAN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "${PATH_TROJAN}")
 
-VLESS_URL="vless://${UUID_VLESS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&packetEncoding=xudp&host=${DOMAIN}&path=${ENC_PATH_VLESS}&sni=${DOMAIN}&encryption=none#cf-vless-ws"
+VLESS_URL="vless://${UUID_VLESS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&packetEncoding=xudp&host=${DOMAIN}&path=${ENC_PATH_VLESS}&sni=${DOMAIN}&encryption=none#Gayroxy-🇺🇳-VLESS-WS"
 
-TROJAN_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&host=${DOMAIN}&path=${ENC_PATH_TROJAN}&sni=${DOMAIN}#cf-trojan-ws"
+TROJAN_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&host=${DOMAIN}&path=${ENC_PATH_TROJAN}&sni=${DOMAIN}#Gayroxy-🇺🇳-Trojan-WS"
 
-VMESS_JSON="{\"v\":\"2\",\"ps\":\"cf-vmess-ws\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${PATH_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
+VMESS_JSON="{\"v\":\"2\",\"ps\":\"Gayroxy-🇺🇳-VMess-WS\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${PATH_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
 VMESS_URL="vmess://$(echo -n "$VMESS_JSON" | base64 -w 0)"
 
-VLESS_GRPC_URL="vless://${UUID_VLESS_GRPC}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_VLESS}&sni=${DOMAIN}&encryption=none#cf-vless-grpc"
+VLESS_GRPC_URL="vless://${UUID_VLESS_GRPC}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_VLESS}&sni=${DOMAIN}&encryption=none#Gayroxy-🇺🇳-VLESS-gRPC"
 
-TROJAN_GRPC_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_TROJAN}&sni=${DOMAIN}#cf-trojan-grpc"
+TROJAN_GRPC_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_TROJAN}&sni=${DOMAIN}#Gayroxy-🇺🇳-Trojan-gRPC"
 
 SS_BASE="$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)"
-SS_URL="ss://${SS_BASE}@127.0.0.1:${PORT_SHADOWSOCKS}#ss-local"
+SS_URL="ss://${SS_BASE}@127.0.0.1:${PORT_SHADOWSOCKS}#Gayroxy-🇺🇳-SS-Local"
 
-REALITY_LOCAL_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#reality-local"
+REALITY_LOCAL_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#Gayroxy-🇺🇳-Reality-Local"
 
 # New external protocols (WS/gRPC through Cloudflare tunnel)
-SS_WS_URL="ss://$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)@${DOMAIN}:443?type=ws&security=tls&path=${PATH_SS_WS}&host=${DOMAIN}#ss-ws"
-SS_GRPC_URL="ss://$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)@${DOMAIN}:443?type=grpc&security=tls&serviceName=${GRPC_SERVICE_SS}&host=${DOMAIN}#ss-grpc"
+SS_WS_URL="ss://$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)@${DOMAIN}:443?type=ws&security=tls&path=${PATH_SS_WS}&host=${DOMAIN}#Gayroxy-🇺🇳-SS-WS"
+SS_GRPC_URL="ss://$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)@${DOMAIN}:443?type=grpc&security=tls&serviceName=${GRPC_SERVICE_SS}&host=${DOMAIN}#Gayroxy-🇺🇳-SS-gRPC"
 
-VMESS_GRPC_JSON="{\"v\":\"2\",\"ps\":\"cf-vmess-grpc\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"grpc\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${GRPC_SERVICE_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
+VMESS_GRPC_JSON="{\"v\":\"2\",\"ps\":\"Gayroxy-🇺🇳-VMess-gRPC\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"grpc\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${GRPC_SERVICE_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
 VMESS_GRPC_URL="vmess://$(echo -n "$VMESS_GRPC_JSON" | base64 -w 0)"
+
+# HTTPUpgrade protocols (new — simpler alternative to WS, works through nginx/CF)
+VLESS_HU_URL="vless://${UUID_VLESS}@${DOMAIN}:443?type=httpupgrade&security=tls&fp=chrome&host=${DOMAIN}&path=${PATH_VLESS_HU}&sni=${DOMAIN}&encryption=none#Gayroxy-🇺🇳-VLESS-HU"
+TROJAN_HU_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=httpupgrade&security=tls&fp=chrome&host=${DOMAIN}&path=${PATH_TROJAN_HU}&sni=${DOMAIN}#Gayroxy-🇺🇳-Trojan-HU"
+VMESS_HU_JSON="{\"v\":\"2\",\"ps\":\"Gayroxy-🇺🇳-VMess-HU\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"httpupgrade\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${PATH_VMESS_HU}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
+VMESS_HU_URL="vmess://$(echo -n "$VMESS_HU_JSON" | base64 -w 0)"
 
 # Direct Reality (stealth — bypasses Cloudflare, connects directly to server)
 REALITY_DIRECT_URL=""
 if [[ -n "$SERVER_IP" ]]; then
-    REALITY_DIRECT_URL="vless://${UUID_REALITY}@${SERVER_IP}:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#reality-direct"
+    REALITY_DIRECT_URL="vless://${UUID_REALITY}@${SERVER_IP}:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#Gayroxy-🇺🇳-Reality-Direct"
 fi
 
-SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#socks5-local"
-HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#http-proxy-local"
+SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#Gayroxy-🇺🇳-Socks5"
+HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#Gayroxy-🇺🇳-HTTP"
 
 # ─── Build subscription file ──────────────────────────────────────────────────
 SUB_CONTENT="${VLESS_URL}
@@ -321,6 +337,9 @@ ${SS_URL}
 ${SS_WS_URL}
 ${SS_GRPC_URL}
 ${VMESS_GRPC_URL}
+${VLESS_HU_URL}
+${TROJAN_HU_URL}
+${VMESS_HU_URL}
 ${REALITY_LOCAL_URL}
 ${REALITY_DIRECT_URL}
 ${SOCKS5_URL}
@@ -335,13 +354,16 @@ envsubst '$DOMAIN' < templates/index.html.tmpl > "${SUB_DIR}/index.html"
 
 export SUB_B64 VLESS_URL TROJAN_URL VMESS_URL VLESS_GRPC_URL TROJAN_GRPC_URL
 export SS_URL SS_WS_URL SS_GRPC_URL VMESS_GRPC_URL
+export VLESS_HU_URL TROJAN_HU_URL VMESS_HU_URL
 export REALITY_LOCAL_URL REALITY_DIRECT_URL SOCKS5_URL HTTP_URL
 export UUID_VLESS PATH_VLESS TROJAN_PASS PATH_TROJAN UUID_VMESS PATH_VMESS
 export UUID_VLESS_GRPC GRPC_SERVICE_VLESS GRPC_SERVICE_TROJAN
 export SS_PASS PORT_SHADOWSOCKS UUID_REALITY REALITY_PUBLIC PORT_REALITY
 export PATH_SS_WS PATH_SS_GRPC PATH_VMESS_GRPC
+export PATH_VLESS_HU PATH_TROJAN_HU PATH_VMESS_HU
 export GRPC_SERVICE_SS GRPC_SERVICE_VMESS
 export PORT_SS_WS PORT_SS_GRPC PORT_VMESS_GRPC
+export PORT_VLESS_HU PORT_TROJAN_HU PORT_VMESS_HU
 export PORT_SOCKS5 PORT_HTTP_PROXY
 export DOMAIN SERVER_IP
 
@@ -390,6 +412,18 @@ echo ""
 echo -e "  ${GRN}VMess + gRPC + TLS${NC}"
 echo -e "     UUID:  ${UUID_VMESS}"
 echo -e "     Svc:   ${GRPC_SERVICE_VMESS}"
+echo ""
+echo -e "  ${GRN}VLESS + HTTPUpgrade + TLS${NC}"
+echo -e "     UUID:  ${UUID_VLESS}"
+echo -e "     Path:  ${PATH_VLESS_HU}"
+echo ""
+echo -e "  ${GRN}Trojan + HTTPUpgrade + TLS${NC}"
+echo -e "     Pass:  ${TROJAN_PASS}"
+echo -e "     Path:  ${PATH_TROJAN_HU}"
+echo ""
+echo -e "  ${GRN}VMess + HTTPUpgrade + TLS${NC}"
+echo -e "     UUID:  ${UUID_VMESS}"
+echo -e "     Path:  ${PATH_VMESS_HU}"
 echo ""
 echo "------------------------------------------"
 echo "  🛡️ Direct (Stealth — bypasses Cloudflare)"

@@ -105,6 +105,42 @@
       }
     },
     {
+      "tag": "vless-hu",
+      "listen": "127.0.0.1",
+      "port": ${PORT_VLESS_HU},
+      "protocol": "vless",
+      "settings": {"clients": [{"id": "${UUID_VLESS}"}], "decryption": "none"},
+      "streamSettings": {
+        "network": "httpupgrade",
+        "security": "none",
+        "httpupgradeSettings": {"path": "${PATH_VLESS_HU}"}
+      }
+    },
+    {
+      "tag": "trojan-hu",
+      "listen": "127.0.0.1",
+      "port": ${PORT_TROJAN_HU},
+      "protocol": "trojan",
+      "settings": {"clients": [{"password": "${TROJAN_PASS}"}]},
+      "streamSettings": {
+        "network": "httpupgrade",
+        "security": "none",
+        "httpupgradeSettings": {"path": "${PATH_TROJAN_HU}"}
+      }
+    },
+    {
+      "tag": "vmess-hu",
+      "listen": "127.0.0.1",
+      "port": ${PORT_VMESS_HU},
+      "protocol": "vmess",
+      "settings": {"clients": [{"id": "${UUID_VMESS}", "alterId": 0}]},
+      "streamSettings": {
+        "network": "httpupgrade",
+        "security": "none",
+        "httpupgradeSettings": {"path": "${PATH_VMESS_HU}"}
+      }
+    },
+    {
       "tag": "reality",
       "listen": "0.0.0.0",
       "port": ${PORT_REALITY},
