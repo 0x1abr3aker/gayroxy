@@ -140,10 +140,17 @@ $WARP_BIN connect >/dev/null 2>&1 || true
 sleep 2
 # Surface WARP status (so users can see if it's actually connected)
 $WARP_BIN status 2>/dev/null | head -5 || warn "WARP status check failed"
+# Probe WARP SOCKS5 to see if it actually routes traffic
+WARP_ACTIVE=false
 if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
-    log "WARP SOCKS5 proxy listening on 127.0.0.1:${WARP_PORT}"
+    if curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q 'warp='; then
+        WARP_ACTIVE=true
+        log "WARP ✓ — Reddit traffic routes through consumer IPs"
+    else
+        warn "WARP SOCKS5 port open but not routing traffic — Reddit stealth disabled"
+    fi
 else
-    warn "WARP SOCKS5 proxy not listening on port ${WARP_PORT} — outbound stealth disabled"
+    warn "WARP SOCKS5 proxy not listening on port ${WARP_PORT} — Reddit stealth disabled"
 fi
 
 # ─── Generate credentials ────────────────────────────────────────────────────
@@ -241,6 +248,22 @@ export XRAY_LOG="${LOG_DIR}/xray.log" \
   REALITY_PRIVATE REALITY_PUBLIC SHORT_ID
 
 envsubst < templates/config.json.tmpl > "$XRAY_CONFIG_FILE"
+
+# Inject WARP routing for Reddit (only if WARP is actually working)
+if [[ "$WARP_ACTIVE" == "true" ]]; then
+    python3 -c "
+import json
+p = '$XRAY_CONFIG_FILE'
+cfg = json.load(open(p))
+cfg.setdefault('routing', {}).setdefault('rules', []).append({
+    'type': 'field',
+    'outboundTag': 'warp',
+    'domain': ['reddit.com', 'www.reddit.com', 'redd.it',
+               'redditmedia.com', 'redditstatic.com']
+})
+json.dump(cfg, open(p, 'w'), indent=2)
+" && log "Reddit traffic routed through WARP ✓" || warn "Failed to inject WARP routing rule"
+fi
 
 # For nginx: only expand OUR variables, leave nginx's own vars ($http_upgrade, etc.)
 NGINX_VARS='$XRAY_DIR $LOG_DIR $PORT_NGINX $SUB_DIR $PATH_VLESS $PORT_VLESS $PATH_TROJAN $PORT_TROJAN $PATH_VMESS $PORT_VMESS $PATH_VLESS_GRPC $PORT_VLESS_GRPC $PATH_TROJAN_GRPC $PORT_TROJAN_GRPC $PATH_SS_WS $PORT_SS_WS $PATH_SS_GRPC $PORT_SS_GRPC $PATH_VMESS_GRPC $PORT_VMESS_GRPC $PATH_VLESS_HU $PORT_VLESS_HU $PATH_TROJAN_HU $PORT_TROJAN_HU $PATH_VMESS_HU $PORT_VMESS_HU'
@@ -383,73 +406,31 @@ export DOMAIN
 
 envsubst < templates/panel.html.tmpl > "${SUB_DIR}/panel.html"
 
-# ─── Final output ─────────────────────────────────────────────────────────────
+# ─── Final output ─────────────────────────────────────────────────────────
 echo ""
 echo "=========================================="
 echo "  🚀 Multi-Protocol Proxy Ready!"
 echo "=========================================="
 echo ""
-echo -e "  ${MAG}Subscription URL:${NC} https://${DOMAIN}/sub"
-echo -e "  ${MAG}Panel URL:${NC}      https://${DOMAIN}/panel"
+echo -e "  ${MAG}📋 Subscription:${NC} https://${DOMAIN}/sub"
+echo -e "  ${MAG}🖥️  Panel:${NC}       https://${DOMAIN}/panel"
 echo ""
-echo "------------------------------------------"
-echo "  🌐 HTTPS Tunnel (via Cloudflare:443)"
-echo "------------------------------------------"
-echo -e "  ${GRN}VLESS + WebSocket + TLS${NC}"
-echo -e "     UUID:  ${UUID_VLESS}"
-echo -e "     Path:  ${PATH_VLESS}"
+echo "── 🌐 Cloudflare Tunnel (TLS) ──────────────────"
+echo -e "  ${GRN}WebSocket${NC}     VLESS | Trojan | VMess | Shadowsocks"
+echo -e "  ${GRN}gRPC${NC}          VLESS | Trojan | VMess | Shadowsocks"
+echo -e "  ${GRN}HTTPUpgrade${NC}   VLESS | Trojan | VMess"
 echo ""
-echo -e "  ${GRN}Trojan + WebSocket + TLS${NC}"
-echo -e "     Pass:  ${TROJAN_PASS}"
-echo -e "     Path:  ${PATH_TROJAN}"
+echo "── 🔒 Local Only ────────────────────────────────"
+echo -e "  Shadowsocks :${PORT_SHADOWSOCKS}  Reality:${PORT_REALITY}  SOCKS5:${PORT_SOCKS5}  HTTP:${PORT_HTTP_PROXY}"
 echo ""
-echo -e "  ${GRN}VMess + WebSocket + TLS${NC}"
-echo -e "     UUID:  ${UUID_VMESS}"
-echo -e "     Path:  ${PATH_VMESS}"
+echo "── 🛡️  Stealth ───────────────────────────────────"
+if [[ "$WARP_ACTIVE" == "true" ]]; then
+    echo -e "  WARP ${GRN}ACTIVE${NC} — Reddit traffic via consumer IPs ${GRN}✓${NC}"
+else
+    echo -e "  WARP ${RED}INACTIVE${NC} — Reddit may still block (datacenter IP)"
+fi
 echo ""
-echo -e "  ${GRN}VLESS + gRPC + TLS${NC}"
-echo -e "     UUID:  ${UUID_VLESS_GRPC}"
-echo -e "     Svc:   ${GRPC_SERVICE_VLESS}"
-echo ""
-echo -e "  ${GRN}Trojan + gRPC + TLS${NC}"
-echo -e "     Pass:  ${TROJAN_PASS}"
-echo -e "     Svc:   ${GRPC_SERVICE_TROJAN}"
-echo ""
-echo -e "  ${GRN}Shadowsocks + WebSocket + TLS${NC}"
-echo -e "     Pass:  ${SS_PASS}"
-echo -e "     Path:  ${PATH_SS_WS}"
-echo ""
-echo -e "  ${GRN}Shadowsocks + gRPC + TLS${NC}"
-echo -e "     Pass:  ${SS_PASS}"
-echo -e "     Svc:   ${GRPC_SERVICE_SS}"
-echo ""
-echo -e "  ${GRN}VMess + gRPC + TLS${NC}"
-echo -e "     UUID:  ${UUID_VMESS}"
-echo -e "     Svc:   ${GRPC_SERVICE_VMESS}"
-echo ""
-echo -e "  ${GRN}VLESS + HTTPUpgrade + TLS${NC}"
-echo -e "     UUID:  ${UUID_VLESS}"
-echo -e "     Path:  ${PATH_VLESS_HU}"
-echo ""
-echo -e "  ${GRN}Trojan + HTTPUpgrade + TLS${NC}"
-echo -e "     Pass:  ${TROJAN_PASS}"
-echo -e "     Path:  ${PATH_TROJAN_HU}"
-echo ""
-echo -e "  ${GRN}VMess + HTTPUpgrade + TLS${NC}"
-echo -e "     UUID:  ${UUID_VMESS}"
-echo -e "     Path:  ${PATH_VMESS_HU}"
-echo ""
-echo "------------------------------------------"
-echo "  🔒 Local Only (127.0.0.1)"
-echo "------------------------------------------"
-echo -e "  ${GRN}Shadowsocks${NC}   127.0.0.1:${PORT_SHADOWSOCKS}"
-echo -e "  ${GRN}REALITY${NC}        127.0.0.1:${PORT_REALITY}"
-echo -e "  ${GRN}SOCKS5${NC}         127.0.0.1:${PORT_SOCKS5}"
-echo -e "  ${GRN}HTTP Proxy${NC}     127.0.0.1:${PORT_HTTP_PROXY}"
-echo ""
-echo "------------------------------------------"
-echo "  Quick links:"
-echo "  ${VLESS_URL}"
+echo -e "  ${YEL}Quick link:${NC} ${VLESS_URL}"
 echo ""
 echo "=========================================="
 echo ""
