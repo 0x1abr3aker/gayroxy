@@ -142,7 +142,7 @@
     },
     {
       "tag": "reality",
-      "listen": "0.0.0.0",
+      "listen": "127.0.0.1",
       "port": ${PORT_REALITY},
       "protocol": "vless",
       "settings": {"clients": [{"id": "${UUID_REALITY}"}], "decryption": "none"},
@@ -175,6 +175,13 @@
     }
   ],
   "outbounds": [
+    {
+      "protocol": "socks",
+      "settings": {
+        "servers": [{"address": "127.0.0.1", "port": ${WARP_PORT}}]
+      },
+      "tag": "warp"
+    },
     {"protocol": "freedom", "settings": {}, "tag": "direct"}
   ]
 }

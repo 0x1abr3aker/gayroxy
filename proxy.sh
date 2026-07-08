@@ -26,6 +26,7 @@ PORT_VMESS_GRPC=10013
 PORT_VLESS_HU=10014
 PORT_TROJAN_HU=10015
 PORT_VMESS_HU=10016
+WARP_PORT=${WARP_PORT:-40000}
 
 # Cloudflare variables (must be set as env vars)
 : "${CF_AUTHTOKEN:?Set CF_AUTHTOKEN}"
@@ -114,6 +115,25 @@ else
     log "cloudflared installed."
 fi
 
+# ─── Install Cloudflare WARP (outbound proxy for consumer IPs) ─────────────
+if command -v warp-cli &>/dev/null; then
+    log "Using system warp-cli"
+else
+    log "Installing Cloudflare WARP..."
+    if [[ ! -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg ]]; then
+        curl -fsSL https://pkg.cloudflareclient.com/cloudflare-warp-gpg.key \
+            | sudo tee /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg >/dev/null
+    fi
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
+        | sudo tee /etc/apt/sources.list.d/cloudflare-warp.list >/dev/null
+    sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
+fi
+warp-cli register >/dev/null 2>&1 || true
+warp-cli set-mode proxy >/dev/null 2>&1 || true
+warp-cli connect >/dev/null 2>&1 || true
+sleep 2
+log "WARP proxy running on 127.0.0.1:${WARP_PORT}"
+
 # ─── Generate credentials ────────────────────────────────────────────────────
 log "Generating credentials..."
 
@@ -198,6 +218,7 @@ export XRAY_LOG="${LOG_DIR}/xray.log" \
   PORT_SHADOWSOCKS PORT_REALITY PORT_SOCKS5 PORT_HTTP_PROXY \
   PORT_SS_WS PORT_SS_GRPC PORT_VMESS_GRPC \
   PORT_VLESS_HU PORT_TROJAN_HU PORT_VMESS_HU \
+  WARP_PORT \
   UUID_VLESS UUID_VLESS_GRPC UUID_VMESS UUID_REALITY \
   TROJAN_PASS SS_PASS \
   PATH_VLESS PATH_TROJAN PATH_VMESS PATH_VLESS_GRPC PATH_TROJAN_GRPC \
@@ -271,18 +292,6 @@ fi
 
 log "Cloudflare tunnel established for domain: ${CF_DOMAIN}"
 
-# ─── Detect server public IP for direct connections ──────────────────────────
-SERVER_IP=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || \
-            curl -s --max-time 5 https://api.ipify.org 2>/dev/null || \
-            curl -s --max-time 5 https://checkip.amazonaws.com 2>/dev/null || \
-            "")
-if [[ -n "$SERVER_IP" ]]; then
-    log "Server public IP: ${SERVER_IP}"
-else
-    SERVER_IP="${CF_DOMAIN}"
-    warn "Could not detect public IP. Using domain for direct URLs."
-fi
-
 # ─── Build subscription URLs ──────────────────────────────────────────────────
 DOMAIN="${CF_DOMAIN}"
 
@@ -318,12 +327,6 @@ TROJAN_HU_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=httpupgrade&security=t
 VMESS_HU_JSON="{\"v\":\"2\",\"ps\":\"Gayroxy-🇺🇳-VMess-HU\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"httpupgrade\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${PATH_VMESS_HU}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
 VMESS_HU_URL="vmess://$(echo -n "$VMESS_HU_JSON" | base64 -w 0)"
 
-# Direct Reality (stealth — bypasses Cloudflare, connects directly to server)
-REALITY_DIRECT_URL=""
-if [[ -n "$SERVER_IP" ]]; then
-    REALITY_DIRECT_URL="vless://${UUID_REALITY}@${SERVER_IP}:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=${SHORT_ID}&type=tcp&sni=www.cloudflare.com#Gayroxy-🇺🇳-Reality-Direct"
-fi
-
 SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#Gayroxy-🇺🇳-Socks5"
 HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#Gayroxy-🇺🇳-HTTP"
 
@@ -341,7 +344,6 @@ ${VLESS_HU_URL}
 ${TROJAN_HU_URL}
 ${VMESS_HU_URL}
 ${REALITY_LOCAL_URL}
-${REALITY_DIRECT_URL}
 ${SOCKS5_URL}
 ${HTTP_URL}"
 
@@ -355,7 +357,7 @@ envsubst '$DOMAIN' < templates/index.html.tmpl > "${SUB_DIR}/index.html"
 export SUB_B64 VLESS_URL TROJAN_URL VMESS_URL VLESS_GRPC_URL TROJAN_GRPC_URL
 export SS_URL SS_WS_URL SS_GRPC_URL VMESS_GRPC_URL
 export VLESS_HU_URL TROJAN_HU_URL VMESS_HU_URL
-export REALITY_LOCAL_URL REALITY_DIRECT_URL SOCKS5_URL HTTP_URL
+export REALITY_LOCAL_URL SOCKS5_URL HTTP_URL
 export UUID_VLESS PATH_VLESS TROJAN_PASS PATH_TROJAN UUID_VMESS PATH_VMESS
 export UUID_VLESS_GRPC GRPC_SERVICE_VLESS GRPC_SERVICE_TROJAN
 export SS_PASS PORT_SHADOWSOCKS UUID_REALITY REALITY_PUBLIC PORT_REALITY
@@ -365,7 +367,7 @@ export GRPC_SERVICE_SS GRPC_SERVICE_VMESS
 export PORT_SS_WS PORT_SS_GRPC PORT_VMESS_GRPC
 export PORT_VLESS_HU PORT_TROJAN_HU PORT_VMESS_HU
 export PORT_SOCKS5 PORT_HTTP_PROXY
-export DOMAIN SERVER_IP
+export DOMAIN
 
 envsubst < templates/panel.html.tmpl > "${SUB_DIR}/panel.html"
 
@@ -424,19 +426,6 @@ echo ""
 echo -e "  ${GRN}VMess + HTTPUpgrade + TLS${NC}"
 echo -e "     UUID:  ${UUID_VMESS}"
 echo -e "     Path:  ${PATH_VMESS_HU}"
-echo ""
-echo "------------------------------------------"
-echo "  🛡️ Direct (Stealth — bypasses Cloudflare)"
-echo "------------------------------------------"
-if [[ -n "$REALITY_DIRECT_URL" ]]; then
-echo -e "  ${GRN}REALITY (VLESS + XTLS)${NC}"
-echo -e "     UUID:  ${UUID_REALITY}"
-echo -e "     IP:    ${SERVER_IP}:${PORT_REALITY}"
-echo -e "     Pub:   ${REALITY_PUBLIC}"
-echo -e "     URL:   ${REALITY_DIRECT_URL}"
-else
-echo -e "  ${RED}REALITY: Could not detect server IP${NC}"
-fi
 echo ""
 echo "------------------------------------------"
 echo "  🔒 Local Only (127.0.0.1)"

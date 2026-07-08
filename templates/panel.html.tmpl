@@ -122,7 +122,6 @@
     <!-- Tabs -->
     <div class="tabs">
         <div class="tab active" onclick="showTab(event,'http')">🌐 HTTP Tunnel</div>
-        <div class="tab" onclick="showTab(event,'direct')">🛡️ Direct</div>
         <div class="tab" onclick="showTab(event,'local')">🔒 Local</div>
         <div class="tab" onclick="showTab(event,'programs')">📱 Apps</div>
     </div>
@@ -131,7 +130,7 @@
     <div id="sec-http" class="section active">
         <div class="stealth-note">
             ⚡ <strong>HTTPS Tunnel via Cloudflare</strong> — These protocols tunnel through Cloudflare (port 443).
-            Convenient but detectable as proxy traffic. For stealth, use the <strong>Direct</strong> tab (REALITY).
+            Outbound traffic is routed through <strong>Cloudflare WARP</strong> to avoid datacenter IP blocks.
         </div>
         <div class="section-header">📡 WebSocket <span class="count" id="ws-count"></span></div>
         <div class="grid" id="ws-grid"></div>
@@ -139,15 +138,6 @@
         <div class="grid" id="grpc-grid"></div>
         <div class="section-header">⬆️ HTTPUpgrade <span class="count" id="hu-count"></span></div>
         <div class="grid" id="hu-grid"></div>
-    </div>
-
-    <!-- Tab: Direct -->
-    <div id="sec-direct" class="section">
-        <div class="stealth-note">
-            🛡️ <strong>REALITY (Stealth)</strong> — Direct connections bypassing Cloudflare.
-            Mimics TLS to cloudflare.com — undetectable. Requires direct port access ($PORT_REALITY not firewalled).
-        </div>
-        <div class="grid" id="direct-grid"></div>
     </div>
 
     <!-- Tab: Local Only -->
@@ -175,7 +165,6 @@
 // ─── Data (injected via envsubst) ──────────────────────────────────────────
 const DATA = {
     domain: '$DOMAIN',
-    serverIP: '$SERVER_IP',
     subB64: '$SUB_B64',
     links: {
         ws: [
@@ -195,12 +184,8 @@ const DATA = {
             {name:'Gayroxy · Trojan · HTTPUpgrade', url: '$TROJAN_HU_URL', details:{Password:'$TROJAN_PASS', Path:'$PATH_TROJAN_HU'}},
             {name:'Gayroxy · VMess · HTTPUpgrade', url: '$VMESS_HU_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS_HU'}},
         ],
-        direct: [
-            {name:'Gayroxy · REALITY · Direct', url: '$REALITY_DIRECT_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Server:'$SERVER_IP:$PORT_REALITY', Flow:'xtls-rprx-vision', SNI:'www.cloudflare.com'}},
-        ],
         local: [
             {name:'Gayroxy · Shadowsocks', url: '$SS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Port:'$PORT_SHADOWSOCKS', Server:'127.0.0.1'}},
-            {name:'Gayroxy · REALITY', url: '$REALITY_LOCAL_URL', details:{UUID:'$UUID_REALITY', PublicKey:'$REALITY_PUBLIC', Port:'$PORT_REALITY', Server:'127.0.0.1'}},
             {name:'Gayroxy · SOCKS5', url: '$SOCKS5_URL', details:{Port:'$PORT_SOCKS5', Server:'127.0.0.1'}},
             {name:'Gayroxy · HTTP Proxy', url: '$HTTP_URL', details:{Port:'$PORT_HTTP_PROXY', Server:'127.0.0.1'}},
         ]
@@ -311,15 +296,14 @@ function buildPrograms() {
     const allWS = DATA.links.ws || [];
     const allGRPC = DATA.links.grpc || [];
     const allHU = DATA.links.hu || [];
-    const allDirect = DATA.links.direct || [];
     const allHTTP = [...allWS, ...allGRPC, ...allHU];
 
     const programs = {
-        'NekoBox / Nekoray': () => [allWS[0], allWS[1], allGRPC[0], allGRPC[1], allDirect[0]],
+        'NekoBox / Nekoray': () => [allWS[0], allWS[1], allGRPC[0], allGRPC[1]],
         'V2RayNG / V2RayN': () => [allWS[0], allWS[2], allGRPC[0], allGRPC[3]],
         'Shadowrocket': () => allHTTP,
         'Streisand / FairVPN': () => [allWS[0], allWS[1]],
-        'v2rayN / Qv2ray': () => [allWS[0], allWS[2], allGRPC[1], allGRPC[2], allGRPC[3], allDirect[0]],
+        'v2rayN / Qv2ray': () => [allWS[0], allWS[2], allGRPC[1], allGRPC[2], allGRPC[3]],
         'Sing-Box / SFI': () => [...allHU, ...allGRPC],
     };
     for (const [name, getLinks] of Object.entries(programs)) {
