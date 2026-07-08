@@ -175,13 +175,23 @@
     }
   ],
   "outbounds": [
+    {"protocol": "freedom", "settings": {}, "tag": "direct"},
     {
       "protocol": "socks",
       "settings": {
         "servers": [{"address": "127.0.0.1", "port": ${WARP_PORT}}]
       },
       "tag": "warp"
-    },
-    {"protocol": "freedom", "settings": {}, "tag": "direct"}
-  ]
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "direct",
+        "inboundTag": ["socks5", "http-proxy", "shadowsocks", "reality"]
+      }
+    ]
+  }
 }
