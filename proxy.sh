@@ -130,14 +130,23 @@ UUID_REALITY=$(cat /proc/sys/kernel/random/uuid)
 TROJAN_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
 SS_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
 
-REALITY_KEYS=$("$XRAY_BIN" x25519 2>/dev/null || true)
-REALITY_PRIVATE=$(echo "$REALITY_KEYS" | grep 'Private' | awk '{print $3}')
-REALITY_PUBLIC=$(echo "$REALITY_KEYS" | grep 'Public' | awk '{print $3}')
+REALITY_KEYS=$("$XRAY_BIN" x25519 2>&1) || true
+# Parse robustly: take the last whitespace-separated field on the line
+# containing "private"/"public", case-insensitively, rather than assuming
+# a fixed label format (xray-core has changed this output across versions).
+REALITY_PRIVATE=$(echo "$REALITY_KEYS" | grep -i 'private' | awk '{print $NF}')
+REALITY_PUBLIC=$(echo "$REALITY_KEYS" | grep -i 'public'  | awk '{print $NF}')
+
+# A UUID (or any other placeholder) is NOT a valid X25519 key and Xray will
+# reject it outright, so we fail loudly here instead of silently injecting
+# a broken key that only surfaces as a cryptic error at Xray startup.
 if [[ -z "$REALITY_PRIVATE" || -z "$REALITY_PUBLIC" ]]; then
-    warn "xray x25519 keygen failed; Reality inbound will not be cryptographically valid."
-    REALITY_PRIVATE=$(cat /proc/sys/kernel/random/uuid)
-    REALITY_PUBLIC=$(cat /proc/sys/kernel/random/uuid)
+    error "Failed to parse Reality x25519 keypair from 'xray x25519' output."
+    error "Raw output was:"
+    echo "$REALITY_KEYS" >&2
+    exit 1
 fi
+log "Reality x25519 keypair generated."
 
 gen_id() { cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr -d '-'; }
 
