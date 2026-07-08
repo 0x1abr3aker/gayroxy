@@ -3,13 +3,12 @@ set -euo pipefail
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 XRAY_DIR="${PWD}"
-CONFIG_FILE="${XRAY_DIR}/config.json"
+XRAY_CONFIG_FILE="${XRAY_DIR}/config.json"
 XRAY_BIN="${XRAY_DIR}/xray"
-NGROK_BIN="${XRAY_DIR}/ngrok"
 NGINX_CONF="${XRAY_DIR}/nginx.conf"
 SUB_DIR="${XRAY_DIR}/sub"
-NGROK_API="http://127.0.0.1:4040/api/tunnels"
 XRAY_LOG="${XRAY_DIR}/xray.log"
+LOG_DIR="${XRAY_DIR}/logs"
 
 # Ports (local only)
 PORT_NGINX=9000
@@ -27,7 +26,6 @@ PORT_HTTP_PROXY=10010
 RED='\033[0;31m'
 GRN='\033[0;32m'
 YEL='\033[1;33m'
-BLU='\033[0;34m'
 CYAN='\033[0;36m'
 MAG='\033[0;35m'
 NC='\033[0m'
@@ -39,15 +37,39 @@ info()  { echo -e "${CYAN}[proxy.sh]${NC} $1"; }
 
 help_msg() {
     cat <<'EOF'
-Usage: NGROK_AUTHTOKEN=xxx NGROK_DOMAIN=my-app.ngrok-free.app ./proxy.sh
+Usage: CF_AUTHTOKEN=xxx CF_DOMAIN=proxy.example.com ./proxy.sh
+
+  CF_AUTHTOKEN  Cloudflare Tunnel token (from the Zero Trust dashboard,
+                or `cloudflared tunnel token <name>`)
+  CF_DOMAIN     Public hostname already routed to that tunnel
+                (e.g. proxy.example.com)
 EOF
 }
 for arg in "$@"; do case "$arg" in -h|--help) help_msg; exit 0;; esac; done
 
+# ─── Validate required env vars early ───────────────────────────────────────
+[[ -z "${CF_AUTHTOKEN:-}" ]] && { error "Set CF_AUTHTOKEN"; help_msg; exit 1; }
+[[ -z "${CF_DOMAIN:-}" ]]    && { error "Set CF_DOMAIN (e.g. proxy.example.com)"; help_msg; exit 1; }
+
+# ─── PID tracking + cleanup (registered early so any failure cleans up) ─────
+XRAY_PID=""
+CLOUDFLARED_PID=""
+
+cleanup() {
+    log "Stopping services..."
+    [[ -f "${XRAY_DIR}/nginx.pid" ]] && nginx -c "${NGINX_CONF}" -p "${XRAY_DIR}" -s stop 2>/dev/null || true
+    [[ -n "${CLOUDFLARED_PID}" ]] && kill "${CLOUDFLARED_PID}" 2>/dev/null || true
+    [[ -n "${XRAY_PID}" ]] && kill "${XRAY_PID}" 2>/dev/null || true
+    [[ -n "${CLOUDFLARED_PID}" ]] && wait "${CLOUDFLARED_PID}" 2>/dev/null || true
+    [[ -n "${XRAY_PID}" ]] && wait "${XRAY_PID}" 2>/dev/null || true
+    log "All services stopped."
+}
+trap cleanup INT TERM EXIT
+
 # ─── Install deps ────────────────────────────────────────────────────────────
 log "Checking dependencies..."
 MISSING=()
-for pkg in curl unzip python3 nginx; do command -v "$pkg" &>/dev/null || MISSING+=("$pkg"); done
+for pkg in curl unzip python3 nginx openssl; do command -v "$pkg" &>/dev/null || MISSING+=("$pkg"); done
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     log "Installing: ${MISSING[*]}"
     if command -v apt-get &>/dev/null; then
@@ -80,56 +102,58 @@ if [[ ! -x "$XRAY_BIN" ]]; then
     log "xray-core downloaded."
 fi
 
-# ─── Install ngrok ─────────────────────────────────────────────────────────
-if command -v ngrok &>/dev/null; then
-    NGROK_BIN=$(command -v ngrok)
-    log "Using system ngrok: ${NGROK_BIN}"
+# ─── Install cloudflared ─────────────────────────────────────────────────────
+if command -v cloudflared &>/dev/null; then
+    CLOUDFLARED_BIN=$(command -v cloudflared)
+    log "Using system cloudflared: ${CLOUDFLARED_BIN}"
 else
-    log "Installing ngrok via apt..."
-    curl -fsSL "https://ngrok-agent.s3.amazonaws.com/ngrok.asc" | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-    echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+    log "Installing cloudflared via apt..."
+    sudo mkdir -p --mode=0755 /usr/share/keyrings
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+    echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
     sudo apt-get update -qq
-    sudo apt-get install -y ngrok
-    NGROK_BIN=$(command -v ngrok)
-    if [[ -z "${NGROK_BIN}" ]]; then
-        error "ngrok installation via apt failed. Please install manually."
+    sudo apt-get install -y -qq cloudflared
+    CLOUDFLARED_BIN=$(command -v cloudflared || true)
+    if [[ -z "${CLOUDFLARED_BIN}" ]]; then
+        error "cloudflared installation via apt failed. Please install manually."
         exit 1
     fi
-    log "ngrok installed via apt."
+    log "cloudflared installed via apt."
 fi
-
-[[ -z "${NGROK_AUTHTOKEN:-}" ]] && { error "Set NGROK_AUTHTOKEN"; exit 1; }
-[[ -z "${NGROK_DOMAIN:-}" ]]    && { error "Set NGROK_DOMAIN (e.g. my-app.ngrok-free.app)"; exit 1; }
 
 # ─── Generate credentials ────────────────────────────────────────────────────
 log "Generating credentials..."
 UUID_VLESS=$(cat /proc/sys/kernel/random/uuid)
-UUID_TROJAN=$(cat /proc/sys/kernel/random/uuid)
 UUID_VMESS=$(cat /proc/sys/kernel/random/uuid)
 UUID_VLESS_GRPC=$(cat /proc/sys/kernel/random/uuid)
-UUID_TROJAN_GRPC=$(cat /proc/sys/kernel/random/uuid)
-UUID_SHADOWSOCKS=$(cat /proc/sys/kernel/random/uuid)
 UUID_REALITY=$(cat /proc/sys/kernel/random/uuid)
 TROJAN_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
 SS_PASS=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
-REALITY_PRIVATE=$("$XRAY_BIN" x25519 2>/dev/null | grep 'Private' | awk '{print $3}' || cat /proc/sys/kernel/random/uuid)
-REALITY_PUBLIC=$("$XRAY_BIN" x25519 2>/dev/null | grep 'Public' | awk '{print $3}' || cat /proc/sys/kernel/random/uuid)
-if [[ -z "$REALITY_PRIVATE" ]]; then REALITY_PRIVATE=$(cat /proc/sys/kernel/random/uuid); REALITY_PUBLIC=$(cat /proc/sys/kernel/random/uuid); fi
 
-# Unique random paths (like the working single-config)
-PATH_VLESS="/$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
-PATH_TROJAN="/$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
-PATH_VMESS="/$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
-PATH_VLESS_GRPC="/vless-grpc-$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
-PATH_TROJAN_GRPC="/trojan-grpc-$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
-GRPC_SERVICE_VLESS="$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
-GRPC_SERVICE_TROJAN="$(cat /proc/sys/kernel/random/uuid || uuidgen | tr -d '-')"
+REALITY_KEYS=$("$XRAY_BIN" x25519 2>/dev/null || true)
+REALITY_PRIVATE=$(echo "$REALITY_KEYS" | grep 'Private' | awk '{print $3}')
+REALITY_PUBLIC=$(echo "$REALITY_KEYS" | grep 'Public' | awk '{print $3}')
+if [[ -z "$REALITY_PRIVATE" || -z "$REALITY_PUBLIC" ]]; then
+    warn "xray x25519 keygen failed; Reality inbound will not be cryptographically valid."
+    REALITY_PRIVATE=$(cat /proc/sys/kernel/random/uuid)
+    REALITY_PUBLIC=$(cat /proc/sys/kernel/random/uuid)
+fi
+
+gen_id() { cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr -d '-'; }
+
+PATH_VLESS="/$(gen_id)"
+PATH_TROJAN="/$(gen_id)"
+PATH_VMESS="/$(gen_id)"
+PATH_VLESS_GRPC="/vless-grpc-$(gen_id)"
+PATH_TROJAN_GRPC="/trojan-grpc-$(gen_id)"
+GRPC_SERVICE_VLESS="$(gen_id)"
+GRPC_SERVICE_TROJAN="$(gen_id)"
 
 # ─── Write xray config ─────────────────────────────────────────────────────
 log "Writing Xray config..."
-mkdir -p "$SUB_DIR" "${XRAY_DIR}/logs"
+mkdir -p "$SUB_DIR" "$LOG_DIR"
 
-cat > "$CONFIG_FILE" <<JSON
+cat > "$XRAY_CONFIG_FILE" <<JSON
 {
   "log": {"access": "${XRAY_LOG}", "error": "${XRAY_LOG}"},
   "inbounds": [
@@ -251,7 +275,7 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
     access_log /dev/null;
-    error_log ${XRAY_DIR}/logs/nginx-error.log;
+    error_log ${LOG_DIR}/nginx-error.log;
 
     map \$http_upgrade \$connection_upgrade {
         default upgrade;
@@ -294,20 +318,20 @@ http {
             proxy_connect_timeout 86400;
         }
 
+        # gRPC locations: grpc_pass only (mixing with proxy_pass is invalid/ambiguous).
+        # Requires nginx built with the gRPC module and HTTP/2 negotiated by the
+        # upstream tunnel; if traffic arrives as plain HTTP/1.1 through cloudflared
+        # these will not work end-to-end without additional h2c handling.
         location ${PATH_VLESS_GRPC} {
-            proxy_pass http://127.0.0.1:${PORT_VLESS_GRPC};
-            proxy_http_version 1.1;
+            grpc_pass grpc://127.0.0.1:${PORT_VLESS_GRPC};
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
-            grpc_pass http://127.0.0.1:${PORT_VLESS_GRPC};
         }
 
         location ${PATH_TROJAN_GRPC} {
-            proxy_pass http://127.0.0.1:${PORT_TROJAN_GRPC};
-            proxy_http_version 1.1;
+            grpc_pass grpc://127.0.0.1:${PORT_TROJAN_GRPC};
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
-            grpc_pass http://127.0.0.1:${PORT_TROJAN_GRPC};
         }
 
         location /panel {
@@ -325,13 +349,13 @@ EOF
 
 # ─── Start xray first ────────────────────────────────────────────────────────
 log "Starting Xray-core..."
-$XRAY_BIN run -c "$CONFIG_FILE" > "${XRAY_DIR}/logs/xray-output.log" 2>&1 &
+$XRAY_BIN run -c "$XRAY_CONFIG_FILE" > "${LOG_DIR}/xray-output.log" 2>&1 &
 XRAY_PID=$!
 
 sleep 1
-if ! kill -0 $XRAY_PID 2>/dev/null; then
+if ! kill -0 "$XRAY_PID" 2>/dev/null; then
     error "Xray failed to start. Logs:"
-    cat "${XRAY_DIR}/logs/xray-output.log" 2>/dev/null | tail -n 20 || true
+    cat "${LOG_DIR}/xray-output.log" 2>/dev/null | tail -n 20 || true
     exit 1
 fi
 log "Xray running (PID: $XRAY_PID)"
@@ -340,72 +364,68 @@ log "Xray running (PID: $XRAY_PID)"
 if ! nginx -t -c "${NGINX_CONF}" > /dev/null 2>&1; then
     error "nginx config test failed:"
     nginx -t -c "${NGINX_CONF}"
-    kill $XRAY_PID 2>/dev/null || true
     exit 1
 fi
 
 nginx -c "${NGINX_CONF}" -p "${XRAY_DIR}"
 log "nginx running on port ${PORT_NGINX}"
 
-# Quick local test
-curl -sI http://127.0.0.1:${PORT_NGINX}/ > /dev/null 2>&1 && log "nginx responds locally ✔" || {
-    error "nginx not responding locally. Check ${XRAY_DIR}/logs/nginx-error.log"
-    kill $XRAY_PID 2>/dev/null || true
+curl -sI "http://127.0.0.1:${PORT_NGINX}/" > /dev/null 2>&1 && log "nginx responds locally ✔" || {
+    error "nginx not responding locally. Check ${LOG_DIR}/nginx-error.log"
     exit 1
 }
 
-# ─── Start ngrok ─────────────────────────────────────────────────────────────
-NGROK_LOG="${XRAY_DIR}/logs/ngrok.log"
-log "Starting ngrok tunnel..."
-$NGROK_BIN http --authtoken "${NGROK_AUTHTOKEN}" --domain="${NGROK_DOMAIN}" ${PORT_NGINX} >"${NGROK_LOG}" 2>&1 &
-NGROK_PID=$!
+# ─── Start Cloudflare Tunnel ────────────────────────────────────────────────
+CLOUDFLARED_LOG="${LOG_DIR}/cloudflared.log"
+log "Starting Cloudflare tunnel..."
+
+"$CLOUDFLARED_BIN" tunnel --no-autoupdate run --token "${CF_AUTHTOKEN}" --url "http://127.0.0.1:${PORT_NGINX}" >"${CLOUDFLARED_LOG}" 2>&1 &
+CLOUDFLARED_PID=$!
 
 MAX_RETRIES=30
-NGROK_URL=""
+TUNNEL_UP=0
 for ((i=1; i<=MAX_RETRIES; i++)); do
     sleep 2
-    if ! kill -0 $NGROK_PID 2>/dev/null; then
-        error "ngrok died. Log:"
-        tail -n 20 "${NGROK_LOG}" 2>/dev/null || true
-        kill $XRAY_PID 2>/dev/null || true
+    if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+        error "cloudflared died. Log:"
+        tail -n 20 "${CLOUDFLARED_LOG}" 2>/dev/null || true
         exit 1
     fi
-
-    DATA=$(curl -s --max-time 2 "$NGROK_API" 2>/dev/null || true)
-    if [[ -n "$DATA" ]]; then
-        NGROK_URL=$(echo "$DATA" | grep -o '"public_url":"https://[^"]*"' | head -1 | sed 's/.*"public_url":"\([^"]*\)".*/\1/')
-        [[ -n "$NGROK_URL" ]] && break
+    if grep -q "Registered tunnel connection" "${CLOUDFLARED_LOG}" 2>/dev/null; then
+        TUNNEL_UP=1
+        break
     fi
 done
 
-if [[ -z "$NGROK_URL" ]]; then
-    error "ngrok tunnel failed."
-    cat "${NGROK_LOG}" | tail -n 30
-    kill $XRAY_PID 2>/dev/null || true
+if [[ "$TUNNEL_UP" -ne 1 ]]; then
+    error "Cloudflare tunnel failed to establish within timeout."
+    cat "${CLOUDFLARED_LOG}" | tail -n 30
     exit 1
 fi
 
-log "ngrok tunnel: ${NGROK_URL}"
+log "Cloudflare tunnel established for domain: ${CF_DOMAIN}"
 
-# ─── Build subscription ─────────────────────────────────────────────────────—
-DOMAIN="${NGROK_DOMAIN}"
+# ─── Build subscription ─────────────────────────────────────────────────────
+DOMAIN="${CF_DOMAIN}"
 
-VLESS_URL="vless://${UUID_VLESS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&packetEncoding=xudp&host=${DOMAIN}&path=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${PATH_VLESS}'))")&sni=${DOMAIN}&encryption=none#ngrok-vless-ws"
+ENC_PATH_VLESS=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "${PATH_VLESS}")
+ENC_PATH_TROJAN=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "${PATH_TROJAN}")
 
-TROJAN_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&host=${DOMAIN}&path=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${PATH_TROJAN}'))")&sni=${DOMAIN}#ngrok-trojan-ws"
+VLESS_URL="vless://${UUID_VLESS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&packetEncoding=xudp&host=${DOMAIN}&path=${ENC_PATH_VLESS}&sni=${DOMAIN}&encryption=none#cf-vless-ws"
 
-VMESS_JSON="{\"v\":\"2\",\"ps\":\"ngrok-vmess-ws\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${PATH_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
+TROJAN_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=ws&security=tls&fp=chrome&host=${DOMAIN}&path=${ENC_PATH_TROJAN}&sni=${DOMAIN}#cf-trojan-ws"
+
+VMESS_JSON="{\"v\":\"2\",\"ps\":\"cf-vmess-ws\",\"add\":\"${DOMAIN}\",\"port\":\"443\",\"id\":\"${UUID_VMESS}\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"${DOMAIN}\",\"path\":\"${PATH_VMESS}\",\"tls\":\"tls\",\"sni\":\"${DOMAIN}\",\"fp\":\"chrome\"}"
 VMESS_URL="vmess://$(echo -n "$VMESS_JSON" | base64 -w 0)"
 
-# ─── URLs for new protocols ─────────────────────────────────────────────——
-VLESS_GRPC_URL="vless://${UUID_VLESS_GRPC}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_VLESS}&sni=${DOMAIN}&encryption=none#ngrok-vless-grpc"
+VLESS_GRPC_URL="vless://${UUID_VLESS_GRPC}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_VLESS}&sni=${DOMAIN}&encryption=none#cf-vless-grpc"
 
-TROJAN_GRPC_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_TROJAN}&sni=${DOMAIN}#ngrok-trojan-grpc"
+TROJAN_GRPC_URL="trojan://${TROJAN_PASS}@${DOMAIN}:443?type=grpc&security=tls&fp=chrome&host=${DOMAIN}&serviceName=${GRPC_SERVICE_TROJAN}&sni=${DOMAIN}#cf-trojan-grpc"
 
 SS_BASE="$(echo -n "aes-256-gcm:${SS_PASS}" | base64 -w 0)"
-SS_URL="ss://${SS_BASE}@127.0.0.1:${PORT_SHADOWSOCKS}#shadowsocks-local"
+SS_URL="ss://${SS_BASE}@127.0.0.1:${PORT_SHADOWSOCKS}#ss-local"
 
-REALITY_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=$(echo -n "${REALITY_PRIVATE}" | base64 -w 0 | head -c 8)&type=tcp&sni=www.cloudflare.com#ngrok-reality-local"
+REALITY_URL="vless://${UUID_REALITY}@127.0.0.1:${PORT_REALITY}?security=reality&flow=xtls-rprx-vision&fp=chrome&pbk=${REALITY_PUBLIC}&sid=$(echo -n "${REALITY_PRIVATE}" | base64 -w 0 | head -c 8)&type=tcp&sni=www.cloudflare.com#reality-local"
 
 SOCKS5_URL="socks5://127.0.0.1:${PORT_SOCKS5}#socks5-local"
 HTTP_URL="http://127.0.0.1:${PORT_HTTP_PROXY}#http-proxy-local"
@@ -428,7 +448,7 @@ cat > "${SUB_DIR}/index.html" <<HTML
 <html><head><title>Proxy Subscription</title></head>
 <body>
 <h1>🚀 Proxy Subscription</h1>
-<p>Subscription URL: <code>${NGROK_URL}/sub</code></p>
+<p>Subscription URL: <code>https://${DOMAIN}/sub</code></p>
 <ul>
 <li>VLESS + WebSocket + TLS</li>
 <li>Trojan + WebSocket + TLS</li>
@@ -449,7 +469,7 @@ echo "=========================================="
 echo "  🚀 Multi-Protocol Proxy Ready!"
 echo "=========================================="
 echo ""
-echo -e "  ${MAG}Subscription URL:${NC} ${NGROK_URL}/sub"
+echo -e "  ${MAG}Subscription URL:${NC} https://${DOMAIN}/sub"
 echo ""
 echo "------------------------------------------"
 echo -e "  ${GRN}VLESS + WebSocket + TLS${NC}"
@@ -464,22 +484,21 @@ echo -e "  ${GRN}VMess + WebSocket + TLS${NC}"
 echo -e "     UUID:  ${UUID_VMESS}"
 echo -e "     Path:  ${PATH_VMESS}"
 echo ""
+echo -e "  ${GRN}VLESS + gRPC + TLS${NC}"
+echo -e "     UUID:  ${UUID_VLESS_GRPC}"
+echo -e "     Svc:   ${GRPC_SERVICE_VLESS}"
+echo ""
+echo -e "  ${GRN}Shadowsocks (local only)${NC}   127.0.0.1:${PORT_SHADOWSOCKS}"
+echo -e "  ${GRN}Reality (local only)${NC}       127.0.0.1:${PORT_REALITY}"
+echo -e "  ${GRN}SOCKS5 (local only)${NC}        127.0.0.1:${PORT_SOCKS5}"
+echo -e "  ${GRN}HTTP proxy (local only)${NC}    127.0.0.1:${PORT_HTTP_PROXY}"
+echo ""
 echo "------------------------------------------"
+echo "  Full VLESS link:"
 echo "  ${VLESS_URL}"
 echo ""
 echo "=========================================="
 echo ""
 
-# ─── Cleanup ─────────────────────────────────────────────────────────────────
-cleanup() {
-    log "Stopping services..."
-    [[ -f "${XRAY_DIR}/nginx.pid" ]] && nginx -c "${NGINX_CONF}" -s stop 2>/dev/null || true
-    kill $NGROK_PID $XRAY_PID 2>/dev/null || true
-    wait $NGROK_PID 2>/dev/null || true
-    wait $XRAY_PID 2>/dev/null || true
-    log "All services stopped."
-}
-trap cleanup INT TERM EXIT
-
 log "Running... (Ctrl-C to stop)"
-wait $XRAY_PID
+wait "$XRAY_PID"

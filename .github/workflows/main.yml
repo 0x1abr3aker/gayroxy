@@ -30,6 +30,8 @@ jobs:
         env:
           NGROK_DOMAIN: ${{ secrets.NGROK_DOMAIN }}
           NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+          CF_DOMAIN: ${{ secrets.CF_DOMAIN }}
+          CF_AUTHTOKEN: ${{ secrets.CF_AUTHTOKEN }}
         run: ./proxy.sh
 
       # - name: Re‑trigger this workflow
