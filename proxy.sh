@@ -151,18 +151,14 @@ else
     sleep 2
     pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
 
-    # ── Debug: show available commands ──
-    log "=== warp-cli available commands ==="
-    sudo $WARP_BIN --help 2>&1 | head -35
-    log "=== trying register ==="
-    sudo $WARP_BIN --accept-tos register 2>&1 || true
-    log "=== trying mode proxy ==="
-    sudo $WARP_BIN mode proxy 2>&1 || true
-    log "=== trying connect ==="
-    sudo $WARP_BIN connect 2>&1 || true
+    # ── Register, set proxy mode, and connect ──
+    # Docs: https://developers.cloudflare.com/warp-client/get-started/linux/
+    sudo $WARP_BIN --accept-tos registration new 2>&1 || true
+    sudo $WARP_BIN mode proxy 2>&1 | head -3 || true
+    sudo $WARP_BIN connect 2>&1 | head -3 || true
     sleep 3
-    log "=== status ==="
-    sudo $WARP_BIN status 2>&1 || true
+    log "WARP status:"
+    sudo $WARP_BIN status 2>&1 | head -8
     log "=== looking for SOCKS5 port ==="
     ss -tlnp 2>/dev/null | grep -E '4000[0-9]' || echo "(none found)"
 
