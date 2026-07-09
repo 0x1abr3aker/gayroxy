@@ -138,7 +138,7 @@ fi
 if [[ -z "$WARP_BIN" ]]; then
     warn "warp-cli not found — skipping WARP (Reddit stealth unavailable)"
 else
-    # warp-cli communicates with warp-svc via D-Bus — ensure D-Bus is running
+    # Ensure D-Bus is running (warp-cli talks to warp-svc via D-Bus)
     if ! pgrep -x dbus-daemon >/dev/null 2>&1; then
         log "Starting D-Bus (required by WARP)..."
         sudo /etc/init.d/dbus start 2>/dev/null || sudo systemctl start dbus 2>/dev/null || \
@@ -147,57 +147,33 @@ else
     fi
 
     # Start warp-svc AFTER D-Bus is up
-    if pgrep -x warp-svc >/dev/null 2>&1; then
-        sudo systemctl restart warp-svc 2>/dev/null || true
-    else
-        sudo systemctl start warp-svc 2>/dev/null || sudo warp-svc --daemonize >/dev/null 2>&1 || true
-    fi
+    sudo systemctl restart warp-svc 2>/dev/null || sudo systemctl start warp-svc 2>/dev/null || true
     sleep 2
     pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
 
-    # Show warp-cli version for reference
-    sudo $WARP_BIN --help 2>&1 | head -5
-
-    # Register device with ToS acceptance (CapitalCase commands in this version!)
-    WARP_REG=$(sudo $WARP_BIN --accept-tos Registration new 2>&1) || true
-    if echo "$WARP_REG" | grep -qi 'already'; then
-        log "WARP already registered"
-    elif echo "$WARP_REG" | grep -qi 'error\|failed\|unknown\|unrecognized'; then
-        warn "WARP register: $(echo "$WARP_REG" | head -1)"
-    elif [[ -n "$WARP_REG" ]] && ! echo "$WARP_REG" | grep -qi 'usage\|help\|command'; then
-        log "WARP registered: $(echo "$WARP_REG" | head -1)"
-    fi
-
-    # Set proxy mode
-    sudo $WARP_BIN Mode proxy 2>&1 | head -2 || true
-
-    # Connect
-    sudo $WARP_BIN Connect 2>&1 | head -2 || true
+    # ── Debug: show available commands ──
+    log "=== warp-cli available commands ==="
+    sudo $WARP_BIN --help 2>&1 | head -35
+    log "=== trying register ==="
+    sudo $WARP_BIN --accept-tos register 2>&1 || true
+    log "=== trying mode proxy ==="
+    sudo $WARP_BIN mode proxy 2>&1 || true
+    log "=== trying connect ==="
+    sudo $WARP_BIN connect 2>&1 || true
     sleep 3
+    log "=== status ==="
+    sudo $WARP_BIN status 2>&1 || true
+    log "=== looking for SOCKS5 port ==="
+    ss -tlnp 2>/dev/null | grep -E '4000[0-9]' || echo "(none found)"
 
-    # Check connection status
-    sudo $WARP_BIN Status 2>&1 | head -8
-
-    # Verify WARP SOCKS5 proxy is actually routing traffic
+    # If we got here and have a SOCKS5 port, try the traffic probe
     if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
         log "WARP SOCKS5 listening on :40000"
         WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
         if echo "$WARP_CHECK" | grep -q 'warp='; then
             WARP_ACTIVE=true
             log "WARP ✓ — routing through consumer IPs"
-        else
-            # Retry once: disconnect and reconnect
-            sudo $WARP_BIN Disconnect >/dev/null 2>&1 || true
-            sleep 1
-            sudo $WARP_BIN Connect >/dev/null 2>&1 || true
-            sleep 3
-            WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
-            echo "$WARP_CHECK" | grep -q 'warp=' && WARP_ACTIVE=true && log "WARP ✓ after reconnect" \
-                || warn "WARP SOCKS5 open but not routing traffic"
         fi
-    else
-        warn "WARP SOCKS5 port 40000 not found — checking for alternative ports..."
-        ss -tlnp 2>/dev/null | grep -E 'warp|4000[0-9]' || true
     fi
 
     if [[ "$WARP_ACTIVE" != "true" ]]; then
