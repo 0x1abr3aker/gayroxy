@@ -156,27 +156,27 @@ else
     pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
 
     # Show available commands for debugging
-    log "Checking warp-cli available commands..."
-    sudo $WARP_BIN --help 2>&1 | head -20
+    sudo $WARP_BIN --help 2>&1 | grep -A2 'Commands:\|  \w' | head -20
 
-    # Register device (anonymous, no auth). Try new syntax then old.
-    WARP_REG=$(sudo $WARP_BIN registration new 2>&1) \
-        || WARP_REG=$(sudo $WARP_BIN register 2>&1) \
-        || true
-    if echo "$WARP_REG" | grep -qi 'error\|failed\|unknown\|unrecognized\|not found'; then
-        echo "$WARP_REG" | grep -qi 'already' && log "WARP already registered" \
-            || warn "WARP register: $(echo "$WARP_REG" | head -1)"
-    else
-        log "WARP registered"
+    # Register device with ToS acceptance (capital-C commands in this version!)
+    WARP_REG=$(sudo $WARP_BIN --accept-tos Registration new 2>&1) || true
+    if echo "$WARP_REG" | grep -qi 'already'; then
+        log "WARP already registered"
+    elif echo "$WARP_REG" | grep -qi 'error\|failed\|unknown\|unrecognized'; then
+        warn "WARP register: $(echo "$WARP_REG" | head -1)"
+    elif [[ -n "$WARP_REG" ]] && ! echo "$WARP_REG" | grep -qi 'usage\|help\|command'; then
+        log "WARP registered: $(echo "$WARP_REG" | head -1)"
     fi
 
     # Set proxy mode
-    sudo $WARP_BIN mode proxy 2>&1 || sudo $WARP_BIN set-mode proxy 2>&1 || \
-        warn "warp-cli set-mode failed"
+    sudo $WARP_BIN Mode proxy 2>&1 | grep -v '^$' | head -2 || true
 
     # Connect
-    sudo $WARP_BIN connect 2>&1 | head -3 || true
+    sudo $WARP_BIN Connect 2>&1 | grep -v '^$' | head -2 || true
     sleep 3
+
+    # Check connection status
+    sudo $WARP_BIN Status 2>&1 | grep -v '^$' | head -5
 
     # Verify WARP SOCKS5 proxy is actually routing traffic
     if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
@@ -186,10 +186,10 @@ else
             WARP_ACTIVE=true
             log "WARP ✓ — routing through consumer IPs"
         else
-            # Retry once: reconnect
-            sudo $WARP_BIN disconnect >/dev/null 2>&1 || true
+            # Retry once: disconnect and reconnect
+            sudo $WARP_BIN Disconnect >/dev/null 2>&1 || true
             sleep 1
-            sudo $WARP_BIN connect >/dev/null 2>&1 || true
+            sudo $WARP_BIN Connect >/dev/null 2>&1 || true
             sleep 3
             WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
             echo "$WARP_CHECK" | grep -q 'warp=' && WARP_ACTIVE=true && log "WARP ✓ after reconnect" \
