@@ -158,7 +158,7 @@ else
     sleep 3
 
     # Check status
-    sudo $WARP_BIN status 2>&1 | head -8
+    sudo warp-cli --accept-tos status | grep -qi "Connected" && echo "up" || echo "down"
 
     # Probe SOCKS5
     if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
