@@ -1,43 +1,38 @@
-name: Run Proxy
+name: Deploy Proxy
 
 on:
-  # Manual trigger only – avoids infinite loops on push/PR
+  push:
+    branches: [ master, main ]
   workflow_dispatch:
 
-  # Optionally also allow a schedule (e.g., every 6 hours)
-  # schedule:
-  #   - cron: '0 */6 * * *'
-
-# Permissions needed to trigger a new workflow run
 permissions:
   actions: write
   contents: read
 
 jobs:
-  run-proxy:
+  deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Make script executable
         run: chmod +x proxy.sh
 
-      - name: Run proxy script
+      - name: Run proxy.sh
         id: proxy
-        continue-on-error: true   # don't fail the job even if script exits with error
         env:
           CF_DOMAIN: ${{ secrets.CF_DOMAIN }}
           CF_AUTHTOKEN: ${{ secrets.CF_AUTHTOKEN }}
-        run: ./proxy.sh
+        run: |
+          echo "::group::Proxy Output"
+          ./proxy.sh
+          echo "::endgroup::"
 
-      # - name: Re‑trigger this workflow
-      #   # Always run this step, even if the script failed
-      #   if: always()
-      #   run: |
-      #     echo "Proxy run finished with exit code ${{ steps.proxy.outcome }}"
-      #     echo "🔄 Triggering a new run of this workflow..."
-      #     gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}"
-      #   env:
-      #     GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      - name: Re-trigger (keep alive)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
