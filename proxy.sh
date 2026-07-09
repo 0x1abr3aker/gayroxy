@@ -155,11 +155,11 @@ else
     sleep 2
     pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
 
-    # Show available commands for debugging
-    sudo $WARP_BIN --help 2>&1 | grep -A2 'Commands:\|  \w' | head -20
+    # Show warp-cli version for reference
+    sudo $WARP_BIN --help 2>&1 | head -5
 
-    # Register device with ToS acceptance (capital-C commands in this version!)
-    WARP_REG=$(sudo $WARP_BIN --accept-tos registration new 2>&1) || true
+    # Register device with ToS acceptance (CapitalCase commands in this version!)
+    WARP_REG=$(sudo $WARP_BIN --accept-tos Registration new 2>&1) || true
     if echo "$WARP_REG" | grep -qi 'already'; then
         log "WARP already registered"
     elif echo "$WARP_REG" | grep -qi 'error\|failed\|unknown\|unrecognized'; then
@@ -169,14 +169,14 @@ else
     fi
 
     # Set proxy mode
-    sudo $WARP_BIN mode proxy 2>&1 | grep -v '^$' | head -2 || true
+    sudo $WARP_BIN Mode proxy 2>&1 | head -2 || true
 
     # Connect
-    sudo $WARP_BIN connect 2>&1 | grep -v '^$' | head -2 || true
+    sudo $WARP_BIN Connect 2>&1 | head -2 || true
     sleep 3
 
     # Check connection status
-    sudo $WARP_BIN status 2>&1 | grep -v '^$' | head -5
+    sudo $WARP_BIN Status 2>&1 | head -8
 
     # Verify WARP SOCKS5 proxy is actually routing traffic
     if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
