@@ -16,7 +16,6 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +64,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          echo "::group::Re-triggering..."
-          gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
-          echo "Re-trigger sent."
-          echo "::endgroup::"
+          DURATION=$(( $(date +%s) - $(date -d "${{ github.run_started_at }}" +%s) ))
+          if [[ $DURATION -lt 30 ]]; then
+            echo "Run lasted ${DURATION}s — too short (likely failure). Skipping re-trigger."
+          else
+            echo "::group::Re-triggering..."
+            gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
+            echo "Done."
+            echo "::endgroup::"
+          fi

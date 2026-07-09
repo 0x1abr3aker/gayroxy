@@ -16,11 +16,13 @@ http {
         listen $PORT_NGINX;
         server_name _;
 
+        # ── Static endpoints ──────────────────────────────────
         location /sub {
             alias $SUB_DIR/subscription.b64;
             default_type text/plain;
         }
 
+        # ── WebSocket locations ────────────────────────────────
         location $PATH_VLESS {
             proxy_pass http://127.0.0.1:$PORT_VLESS;
             proxy_http_version 1.1;
@@ -48,6 +50,7 @@ http {
             proxy_connect_timeout 86400;
         }
 
+        # ── gRPC locations ────────────────────────────────────
         location $PATH_VLESS_GRPC {
             grpc_pass grpc://127.0.0.1:$PORT_VLESS_GRPC;
             proxy_set_header Host $host;
@@ -81,6 +84,7 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
         }
 
+        # ── HTTPUpgrade locations ─────────────────────────────
         location $PATH_VLESS_HU {
             proxy_pass http://127.0.0.1:$PORT_VLESS_HU;
             proxy_http_version 1.1;

@@ -4,323 +4,625 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🇺🇳 Gayroxy Proxy</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
-        :root { --bg:#0f0f1a; --card:#1a1a2e; --text:#e0e0ff; --accent:#00d4aa; --accent2:#ff6b6b; --accent3:#4ecdc4; --accent4:#ffd93d; --accent5:#a855f7; }
+        :root {
+            --bg: #0b0b18;
+            --bg2: #111125;
+            --card: #16162e;
+            --card-hover: #1c1c3a;
+            --border: #2a2a4a;
+            --border-glow: rgba(0,212,170,0.15);
+            --text: #dcdcff;
+            --text2: #9898b8;
+            --accent: #00d4aa;
+            --accent2: #ff6b6b;
+            --accent3: #4ecdc4;
+            --accent4: #ffd93d;
+            --accent5: #a855f7;
+            --accent6: #f472b6;
+            --shadow: rgba(0,0,0,0.4);
+        }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.6; min-height:100vh; }
-        .container { max-width:1200px; margin:0 auto; padding:20px; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.6;
+            min-height: 100vh;
+            background-image:
+                radial-gradient(ellipse 600px 400px at 20% 10%, rgba(0,212,170,0.04) 0%, transparent 70%),
+                radial-gradient(ellipse 500px 500px at 80% 90%, rgba(168,85,247,0.04) 0%, transparent 70%);
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
 
         /* ── Header / Logo ── */
-        .logo { text-align:center; padding:30px 0 0; }
-        .logo h1 { font-size:3rem; font-weight:800; letter-spacing:-1px; background:linear-gradient(135deg,var(--accent),var(--accent3),var(--accent5)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
-        .logo .subtitle { color:#666; font-size:14px; letter-spacing:4px; text-transform:uppercase; margin-top:4px; }
-        .logo .flag { font-size:1.5rem; display:block; margin-bottom:4px; }
-        .summary { text-align:center; color:#888; margin-bottom:20px; font-size:14px; }
+        .logo { text-align: center; padding: 40px 0 8px; }
+        .logo .flag { font-size: 2rem; display: block; margin-bottom: 6px; }
+        .logo h1 {
+            font-size: 3.2rem; font-weight: 800; letter-spacing: -2px;
+            background: linear-gradient(135deg, var(--accent), var(--accent3), var(--accent5), var(--accent6));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            filter: drop-shadow(0 0 30px rgba(0,212,170,0.15));
+        }
+        .logo .subtitle {
+            color: var(--text2); font-size: 13px; letter-spacing: 6px;
+            text-transform: uppercase; margin-top: 2px;
+        }
+        .summary { text-align: center; color: var(--text2); margin-bottom: 24px; font-size: 14px; }
 
         /* ── Tabs ── */
-        .tabs { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-bottom:24px; }
-        .tab { background:var(--card); border:1px solid #333; padding:8px 18px; border-radius:8px; cursor:pointer; transition:all .3s; font-size:14px; }
-        .tab:hover, .tab.active { background:var(--accent); color:#000; border-color:var(--accent); }
-        .section { display:none; animation:fadeIn .25s ease; }
-        .section.active { display:block; }
+        .tabs { display: flex; justify-content: center; gap: 4px; margin-bottom: 28px; background: var(--card); border-radius: 14px; padding: 4px; border: 1px solid var(--border); width: fit-content; margin-left: auto; margin-right: auto; }
+        .tab {
+            padding: 10px 22px; border-radius: 10px; cursor: pointer;
+            transition: all .25s; font-size: 14px; font-weight: 500;
+            color: var(--text2); background: transparent; border: none;
+            position: relative;
+        }
+        .tab:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+        .tab.active { color: #fff; background: linear-gradient(135deg, rgba(0,212,170,0.15), rgba(78,205,196,0.10)); }
+        .tab.active::after {
+            content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+            width: 20px; height: 3px; border-radius: 3px;
+            background: linear-gradient(90deg, var(--accent), var(--accent3));
+        }
+        .section { display: none; }
+        .section.active { display: block; }
 
         /* ── Subscription Box ── */
-        .sub-box { background:linear-gradient(135deg,var(--card),#1a1a3e); padding:24px; border-radius:16px; margin-bottom:30px; border:1px solid #2a2a4e; }
-        .sub-box h2 { text-align:center; margin-bottom:14px; font-size:1.4rem; color:var(--accent); }
-        .sub-box .sub-inner { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:24px; }
-        .sub-box .sub-text { flex:1; min-width:280px; text-align:center; }
-        .sub-box .sub-qr { flex:0 0 auto; }
-        .sub-url { background:#0a0a14; padding:14px; border-radius:8px; font-family:monospace; word-break:break-all; display:inline-block; max-width:100%; border:1px solid #333; }
-        .btn { background:var(--accent3); color:#000; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:bold; margin:5px; transition:all .2s; }
-        .btn:hover { opacity:.9; transform:translateY(-1px); }
-        .btn.primary { background:var(--accent); }
-        .btn.danger { background:var(--accent2); }
+        .sub-box {
+            background: linear-gradient(135deg, var(--card), #1a1a40);
+            padding: 24px; border-radius: 16px; margin-bottom: 28px;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 30px var(--shadow);
+            position: relative; overflow: hidden;
+        }
+        .sub-box::before {
+            content: ''; position: absolute; top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background: radial-gradient(circle at 30% 50%, rgba(0,212,170,0.03) 0%, transparent 50%);
+            pointer-events: none;
+        }
+        .sub-box h2 { text-align: center; margin-bottom: 14px; font-size: 1.3rem; color: var(--accent); font-weight: 700; }
+        .sub-box .sub-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 24px; position: relative; z-index: 1; }
+        .sub-box .sub-text { flex: 1; min-width: 260px; text-align: center; }
+        .sub-box .sub-qr { flex: 0 0 auto; }
+        .sub-url {
+            background: #0a0a16; padding: 14px; border-radius: 10px;
+            font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px;
+            word-break: break-all; display: inline-block; max-width: 100%;
+            border: 1px solid var(--border); color: var(--text2);
+        }
+        .btn {
+            background: linear-gradient(135deg, var(--accent3), var(--accent));
+            color: #000; border: none; padding: 10px 22px; border-radius: 10px;
+            cursor: pointer; font-weight: 600; font-size: 13px;
+            margin: 5px; transition: all .25s; display: inline-flex;
+            align-items: center; gap: 6px;
+        }
+        .btn:hover { opacity: .9; transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,212,170,0.25); }
+        .btn.primary { background: linear-gradient(135deg, var(--accent), #00b894); }
+        .btn.danger { background: linear-gradient(135deg, var(--accent2), #e05555); color: #fff; }
+        .btn.danger:hover { box-shadow: 0 4px 15px rgba(255,107,107,0.3); }
+        .btn.outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+        .btn.outline:hover { border-color: var(--accent); color: var(--accent); box-shadow: none; }
 
         /* ── Section Headers ── */
-        .section-header { margin:24px 0 12px; padding:10px 18px; background:var(--card); border-radius:10px; border-left:4px solid var(--accent); font-weight:700; font-size:17px; display:flex; align-items:center; gap:10px; color:#ddd; }
-        .section-header .count { background:#333; color:#999; font-size:12px; padding:2px 10px; border-radius:12px; font-weight:400; }
-        .stealth-note { background:#1a2e1a; border-left:4px solid var(--accent4); padding:12px 16px; border-radius:8px; margin-bottom:20px; font-size:14px; color:#ccc; }
-        .stealth-note strong { color:var(--accent4); }
+        .section-header {
+            margin: 28px 0 14px; padding: 12px 20px;
+            background: linear-gradient(135deg, var(--card), #1c1c38);
+            border-radius: 12px; border-left: 4px solid var(--accent);
+            font-weight: 700; font-size: 17px;
+            display: flex; align-items: center; gap: 10px; color: #eee;
+            box-shadow: 0 2px 10px var(--shadow);
+        }
+        .section-header .count {
+            background: rgba(255,255,255,0.06); color: var(--text2);
+            font-size: 12px; padding: 2px 10px; border-radius: 20px; font-weight: 500;
+        }
+        .stealth-note {
+            background: linear-gradient(135deg, #0f2a1a, #0e2218);
+            border-left: 4px solid var(--accent4); padding: 14px 18px;
+            border-radius: 10px; margin-bottom: 20px; font-size: 14px;
+            color: #bbb; border: 1px solid rgba(255,217,61,0.08);
+        }
+        .stealth-note strong { color: var(--accent4); }
 
         /* ── Grid / Cards ── */
-        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:16px; margin-bottom:8px; }
-        .card { background:var(--card); border-radius:14px; padding:20px; border:1px solid #2a2a3e; transition:all .25s; }
-        .card:hover { transform:translateY(-4px); border-color:var(--accent); box-shadow:0 8px 30px rgba(0,212,170,.08); }
-        .card h3 { font-size:15px; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-        .card h3 .proto-name { color:var(--text); }
-        .badge { display:inline-block; padding:3px 10px; border-radius:5px; font-size:11px; font-weight:600; background:#333; margin:2px 2px 0 0; letter-spacing:.5px; }
-        .badge.ws { background:#1a3a1a; color:#7cfc00; }
-        .badge.grpc { background:#1a2a4a; color:#60a5fa; }
-        .badge.hu { background:#2a1a4a; color:#c084fc; }
-        .badge.direct { background:#3a2a1a; color:#fbbf24; }
-        .badge.local { background:#3a1a1a; color:#f87171; }
-        .details { background:#0a0a14; padding:10px 14px; border-radius:8px; margin:10px 0; font-family:monospace; font-size:13px; word-break:break-all; border:1px solid #1a1a2a; }
-        .details .label { color:#666; font-size:10px; display:block; margin-bottom:3px; text-transform:uppercase; letter-spacing:.5px; }
-        .card-actions { display:flex; gap:8px; margin-top:10px; }
-        .card-actions button { flex:1; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; font-weight:600; font-size:12px; transition:all .2s; }
-        .copy-btn { background:var(--accent); color:#000; }
-        .copy-btn:hover { opacity:.85; }
-        .copy-btn.copied { background:var(--accent3); }
-        .modal-btn { background:#333; color:var(--text); }
-        .modal-btn:hover { background:#444; }
-        .qr-container { text-align:center; margin:12px 0; display:none; }
-        .qr-container canvas { max-width:160px; border-radius:8px; background:#fff; padding:6px; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 14px; margin-bottom: 8px;
+        }
+        .card {
+            background: var(--card); border-radius: 14px; padding: 20px;
+            border: 1px solid var(--border);
+            transition: all .3s cubic-bezier(.4,0,.2,1);
+            position: relative; overflow: hidden;
+        }
+        .card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0; transition: opacity .3s;
+        }
+        .card:hover {
+            border-color: rgba(0,212,170,0.3);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 40px var(--border-glow);
+            background: var(--card-hover);
+        }
+        .card:hover::before { opacity: 1; }
+        .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: #eee; }
+        .card .protocol-tag {
+            display: inline-block; font-size: 11px; font-weight: 600;
+            padding: 2px 10px; border-radius: 20px; margin-bottom: 10px;
+            letter-spacing: 0.5px; text-transform: uppercase;
+        }
+        .tag-ws { background: rgba(0,212,170,0.12); color: var(--accent); }
+        .tag-grpc { background: rgba(168,85,247,0.12); color: var(--accent5); }
+        .tag-hu { background: rgba(244,114,182,0.12); color: var(--accent6); }
+        .tag-local { background: rgba(255,217,61,0.12); color: var(--accent4); }
+        .card .url-preview {
+            background: #0a0a14; padding: 10px 12px; border-radius: 8px;
+            font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+            word-break: break-all; color: var(--text2); margin: 8px 0 12px;
+            border: 1px solid rgba(255,255,255,0.04);
+            max-height: 40px; overflow: hidden; line-height: 1.4;
+        }
+        .card .actions { display: flex; gap: 8px; margin-top: 12px; }
+        .card .actions .btn { flex: 1; justify-content: center; }
 
         /* ── Modal ── */
-        .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); display:none; align-items:center; justify-content:center; z-index:9999; backdrop-filter:blur(4px); animation:fadeIn .2s ease; }
-        .modal-overlay.open { display:flex; }
-        .modal-content { background:var(--card); border-radius:20px; padding:32px; max-width:440px; width:92%; text-align:center; border:1px solid #333; position:relative; animation:scaleIn .25s ease; max-height:95vh; overflow-y:auto; }
-        .modal-close { position:absolute; top:12px; right:16px; background:none; border:none; color:#888; font-size:26px; cursor:pointer; transition:color .2s; padding:4px; line-height:1; }
-        .modal-close:hover { color:var(--text); }
-        .modal-content h3 { font-size:18px; margin-bottom:8px; }
-        .modal-qr { margin:16px 0; }
-        .modal-qr canvas { max-width:280px; border-radius:14px; background:#fff; padding:16px; }
-        .modal-link { background:#0a0a14; padding:14px; border-radius:10px; word-break:break-all; font-family:monospace; font-size:13px; margin:12px 0; border:1px solid #2a2a3e; text-align:left; }
-        .modal-details { background:#0a0a14; padding:12px 16px; border-radius:8px; margin:12px 0; font-family:monospace; font-size:13px; text-align:left; border:1px solid #1a1a2e; }
-        .modal-details .row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1a1a2a; }
-        .modal-details .row:last-child { border-bottom:none; }
-        .modal-details .row .key { color:#888; }
-        .modal-details .row .val { color:var(--accent); word-break:break-all; text-align:right; max-width:60%; }
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            display: none; align-items: center; justify-content: center;
+            z-index: 1000; padding: 20px;
+            animation: fadeIn .2s ease;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-content {
+            background: linear-gradient(145deg, var(--card), #1e1e3a);
+            border-radius: 20px; padding: 32px;
+            max-width: 460px; width: 100%; max-height: 90vh; overflow-y: auto;
+            border: 1px solid var(--border);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            animation: scaleIn .25s cubic-bezier(.34,1.56,.64,1);
+            position: relative;
+        }
+        .modal-close {
+            position: absolute; top: 12px; right: 16px;
+            background: rgba(255,255,255,0.06); border: none;
+            color: var(--text2); font-size: 20px; cursor: pointer;
+            width: 32px; height: 32px; border-radius: 50%;
+            transition: all .2s;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+        .modal-header {
+            text-align: center; margin-bottom: 16px;
+        }
+        .modal-header h3 {
+            font-size: 18px; font-weight: 700;
+            background: linear-gradient(90deg, #fff, var(--accent3));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .modal-header .subtitle { font-size: 12px; color: var(--text2); margin-top: 2px; }
+        .modal-qr {
+            display: flex; justify-content: center; margin: 16px 0;
+        }
+        .modal-qr canvas, .modal-qr img {
+            max-width: 260px; border-radius: 14px;
+            background: #fff; padding: 14px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .modal-link-box {
+            background: #0a0a16; padding: 14px; border-radius: 10px;
+            border: 1px solid var(--border); margin: 8px 0 14px;
+        }
+        .modal-link-box .link-label {
+            font-size: 11px; color: var(--text2); text-transform: uppercase;
+            letter-spacing: 1px; margin-bottom: 6px;
+        }
+        .modal-link-box .link-value {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 12px; word-break: break-all; color: var(--text);
+            line-height: 1.5; max-height: 80px; overflow-y: auto;
+        }
+        .modal-details {
+            margin: 12px 0 16px; border-radius: 10px;
+            border: 1px solid var(--border); overflow: hidden;
+        }
+        .modal-details .detail-row {
+            display: flex; padding: 10px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            font-size: 13px;
+        }
+        .modal-details .detail-row:last-child { border-bottom: none; }
+        .modal-details .detail-label {
+            color: var(--text2); flex: 0 0 100px; font-weight: 500;
+        }
+        .modal-details .detail-value {
+            color: var(--text); flex: 1; word-break: break-all;
+            font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px;
+        }
+        .modal-actions {
+            display: flex; gap: 10px; margin-top: 8px;
+        }
+        .modal-actions .btn { flex: 1; justify-content: center; padding: 12px; font-size: 14px; }
 
-        /* ── Program section ── */
-        .program-section { margin:20px 0; }
-        .program-section h4 { color:var(--accent2); margin-bottom:10px; border-bottom:1px solid #333; padding-bottom:8px; font-size:15px; display:flex; align-items:center; gap:8px; }
-        .url-list { list-style:none; }
-        .url-list li { background:#0a0a14; padding:10px 14px; margin:6px 0; border-radius:8px; word-break:break-all; font-family:monospace; font-size:13px; border:1px solid #1a1a2a; }
-        .url-list li a { color:var(--accent3); text-decoration:none; }
-        .url-list li a:hover { text-decoration:underline; }
+        /* ── Programs Tab ── */
+        .program-section {
+            background: var(--card); border-radius: 14px; padding: 20px;
+            margin-bottom: 14px; border: 1px solid var(--border);
+            transition: all .2s;
+        }
+        .program-section:hover { border-color: rgba(0,212,170,0.2); }
+        .program-section h4 {
+            font-size: 15px; font-weight: 600; margin-bottom: 10px; color: var(--accent3);
+        }
+        .url-list { list-style: none; }
+        .url-list li {
+            padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+            font-size: 13px;
+        }
+        .url-list li:last-child { border-bottom: none; }
+        .url-list a { color: var(--accent); text-decoration: none; word-break: break-all; }
+        .url-list a:hover { text-decoration: underline; }
+        .url-list b { color: var(--text2); min-width: 120px; display: inline-block; }
 
-        /* ── Utilities ── */
-        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
-        @keyframes scaleIn { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:scale(1); } }
-        @media (max-width:600px) { .grid { grid-template-columns:1fr; } .logo h1 { font-size:2.2rem; } .modal-content { padding:24px 20px; } }
+        /* ── Animations ── */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.92) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes glowPulse {
+            0%, 100% { box-shadow: 0 0 20px var(--border-glow); }
+            50% { box-shadow: 0 0 40px var(--border-glow), 0 0 60px rgba(0,212,170,0.05); }
+        }
+
+        /* ── Toast Notification ── */
+        .toast {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: var(--card); color: var(--accent); padding: 12px 24px;
+            border-radius: 12px; border: 1px solid rgba(0,212,170,0.3);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+            font-size: 14px; font-weight: 500; z-index: 2000;
+            animation: scaleIn .25s ease;
+            backdrop-filter: blur(8px);
+        }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .logo h1 { font-size: 2.2rem; }
+            .container { padding: 12px; }
+            .grid { grid-template-columns: 1fr; }
+            .card .actions { flex-direction: column; }
+            .modal-content { padding: 20px; }
+            .tabs { flex-wrap: nowrap; overflow-x: auto; width: 100%; justify-content: stretch; }
+            .tab { flex: 1; text-align: center; font-size: 12px; padding: 10px 12px; }
+        }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 <div class="container">
+
+    <!-- ── Header ── -->
     <div class="logo">
-        <span class="flag">🇺🇳</span>
+        <span class="flag">🏳️‍🌈</span>
         <h1>Gayroxy</h1>
-        <div class="subtitle">Multi-Protocol Proxy Gateway</div>
+        <div class="subtitle">Multi-Protocol Proxy Suite</div>
     </div>
-    <p class="summary">Your all-in-one proxy dashboard — pick a protocol, scan, connect.</p>
+    <div class="summary">⚡ 15 configs · 1 domain · ∞ possibilities</div>
 
-    <!-- Subscription Box -->
-    <div class="sub-box">
-        <h2>📋 Subscription</h2>
-        <div class="sub-inner">
-            <div class="sub-text">
-                <div class="sub-url" id="sub-url">https://$DOMAIN/sub</div><br>
-                <button class="btn primary" onclick="copyToClipboard('https://$DOMAIN/sub')">📋 Copy URL</button>
-                <button class="btn" onclick="copySubB64()">📦 Copy Base64</button>
-            </div>
-            <div class="sub-qr" id="sub-qr"></div>
-        </div>
-    </div>
-
-    <!-- Tabs -->
+    <!-- ── Tabs ── -->
     <div class="tabs">
-        <div class="tab active" onclick="showTab(event,'http')">🌐 HTTP Tunnel</div>
-        <div class="tab" onclick="showTab(event,'local')">🔒 Local</div>
-        <div class="tab" onclick="showTab(event,'programs')">📱 Apps</div>
+        <div class="tab active" onclick="switchTab('http')">🌐 HTTP Tunnel</div>
+        <div class="tab" onclick="switchTab('local')">🔒 Local</div>
+        <div class="tab" onclick="switchTab('programs')">📱 Programs</div>
     </div>
 
-    <!-- Tab: HTTP Tunnel -->
-    <div id="sec-http" class="section active">
-        <div class="stealth-note">
-            ⚡ <strong>HTTPS Tunnel via Cloudflare</strong> — These protocols tunnel through Cloudflare (port 443).
-            Outbound traffic is routed through <strong>Cloudflare WARP</strong> to avoid datacenter IP blocks.
+    <!-- ════ HTTP Tunnel Tab ════ -->
+    <div id="tab-http" class="section active">
+
+        <!-- Subscription Box -->
+        <div class="sub-box">
+            <h2>📋 Subscription Link</h2>
+            <div class="sub-inner">
+                <div class="sub-text">
+                    <div class="sub-url" id="sub-url">https://${DOMAIN}/sub</div>
+                    <button class="btn primary" onclick="copySub()">📋 Copy Subscription</button>
+                </div>
+                <div class="sub-qr" id="sub-qr"></div>
+            </div>
         </div>
-        <div class="section-header">📡 WebSocket <span class="count" id="ws-count"></span></div>
-        <div class="grid" id="ws-grid"></div>
-        <div class="section-header">🔗 gRPC <span class="count" id="grpc-count"></span></div>
-        <div class="grid" id="grpc-grid"></div>
-        <div class="section-header">⬆️ HTTPUpgrade <span class="count" id="hu-count"></span></div>
-        <div class="grid" id="hu-grid"></div>
+
+        <!-- Stealth / WARP status -->
+        <div class="stealth-note">
+            <strong>🛡️ Stealth Proxy</strong> — Traffic tunnels through Cloudflare via WebSocket/gRPC/HTTPUpgrade.
+            All TLS-terminated at the edge. Reddit traffic is routed through WARP consumer IPs for stealth.
+        </div>
+
+        <!-- Card containers filled by JS -->
+        <div id="cards-ws"></div>
+        <div id="cards-grpc"></div>
+        <div id="cards-hu"></div>
     </div>
 
-    <!-- Tab: Local Only -->
-    <div id="sec-local" class="section">
-        <div class="grid" id="local-grid"></div>
+    <!-- ════ Local Tab ════ -->
+    <div id="tab-local" class="section">
+        <div id="cards-local"></div>
     </div>
 
-    <!-- Tab: Programs -->
-    <div id="sec-programs" class="section"><div id="program-content"></div></div>
+    <!-- ════ Programs Tab ════ -->
+    <div id="tab-programs" class="section">
+        <div class="stealth-note">
+            <strong>💡 Quick Setup</strong> — Click a link below to copy the appropriate configs
+            into your preferred client.
+        </div>
+        <div id="programs-list"></div>
+    </div>
+
+    <!-- ════ QR Modal ════ -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeModal()">✕</button>
+            <div class="modal-header">
+                <h3 id="modal-title">Gayroxy</h3>
+                <div class="subtitle" id="modal-subtitle">Click to copy or scan QR</div>
+            </div>
+            <div class="modal-qr" id="modal-qr"></div>
+            <div class="modal-link-box">
+                <div class="link-label">🔗 Share Link</div>
+                <div class="link-value" id="modal-link"></div>
+            </div>
+            <div class="modal-details" id="modal-details"></div>
+            <div class="modal-actions">
+                <button class="btn primary" id="modal-copy-btn" onclick="copyFromModal()">📋 Copy Link</button>
+                <button class="btn outline" onclick="window.open(document.getElementById('modal-link').textContent, '_blank')">🔗 Open</button>
+            </div>
+        </div>
+    </div>
+
 </div>
-
-<!-- Modal -->
-<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
-    <div class="modal-content" id="modal-content">
-        <button class="modal-close" onclick="closeModal()">✕</button>
-        <h3 id="modal-title"></h3>
-        <div class="modal-qr" id="modal-qr"></div>
-        <div class="modal-link" id="modal-link"></div>
-        <div class="modal-details" id="modal-details"></div>
-        <button class="btn primary" onclick="copyFromModal()" id="modal-copy-btn" style="width:100%;margin-top:8px;padding:12px;">📋 Copy Link</button>
-    </div>
-</div>
-
 <script>
-// ─── Data (injected via envsubst) ──────────────────────────────────────────
-const DATA = {
-    domain: '$DOMAIN',
-    subB64: '$SUB_B64',
-    links: {
+    // ════════════════════════════════════════════════════════════════════════════
+    //  DATA — All protocol configs
+    //  These vars are injected by proxy.sh via envsubst
+    // ════════════════════════════════════════════════════════════════════════════
+
+    const D = ${DATA};
+
+    const DATA = {
         ws: [
-            {name:'Gayroxy · VLESS · WebSocket', url: '$VLESS_URL', details:{UUID:'$UUID_VLESS', Path:'$PATH_VLESS'}},
-            {name:'Gayroxy · Trojan · WebSocket', url: '$TROJAN_URL', details:{Password:'$TROJAN_PASS', Path:'$PATH_TROJAN'}},
-            {name:'Gayroxy · VMess · WebSocket', url: '$VMESS_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS'}},
-            {name:'Gayroxy · Shadowsocks · WebSocket', url: '$SS_WS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Path:'$PATH_SS_WS'}},
+            { name: 'VLESS · WebSocket', tag: 'ws', url: D.VLESS_URL, protocol: 'VLESS', transport: 'WebSocket', uuid: D.UUID_VLESS, path: D.PATH_VLESS, port: '443', tls: 'tls' },
+            { name: 'Trojan · WebSocket', tag: 'ws', url: D.TROJAN_URL, protocol: 'Trojan', transport: 'WebSocket', pass: D.TROJAN_PASS, path: D.PATH_TROJAN, port: '443', tls: 'tls' },
+            { name: 'VMess · WebSocket', tag: 'ws', url: D.VMESS_URL, protocol: 'VMess', transport: 'WebSocket', uuid: D.UUID_VMESS, path: D.PATH_VMESS, port: '443', tls: 'tls' },
+            { name: 'Shadowsocks · WebSocket', tag: 'ws', url: D.SS_WS_URL, protocol: 'Shadowsocks', transport: 'WebSocket', pass: D.SS_PASS, path: D.PATH_SS_WS, port: '443', tls: 'tls' },
         ],
         grpc: [
-            {name:'Gayroxy · VLESS · gRPC', url: '$VLESS_GRPC_URL', details:{UUID:'$UUID_VLESS_GRPC', Service:'$GRPC_SERVICE_VLESS'}},
-            {name:'Gayroxy · Trojan · gRPC', url: '$TROJAN_GRPC_URL', details:{Password:'$TROJAN_PASS', Service:'$GRPC_SERVICE_TROJAN'}},
-            {name:'Gayroxy · Shadowsocks · gRPC', url: '$SS_GRPC_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Service:'$GRPC_SERVICE_SS'}},
-            {name:'Gayroxy · VMess · gRPC', url: '$VMESS_GRPC_URL', details:{UUID:'$UUID_VMESS', Service:'$GRPC_SERVICE_VMESS'}},
+            { name: 'VLESS · gRPC', tag: 'grpc', url: D.VLESS_GRPC_URL, protocol: 'VLESS', transport: 'gRPC', uuid: D.UUID_VLESS_GRPC, serviceName: D.GRPC_SERVICE_VLESS, port: '443', tls: 'tls' },
+            { name: 'Trojan · gRPC', tag: 'grpc', url: D.TROJAN_GRPC_URL, protocol: 'Trojan', transport: 'gRPC', pass: D.TROJAN_PASS, serviceName: D.GRPC_SERVICE_TROJAN, port: '443', tls: 'tls' },
+            { name: 'Shadowsocks · gRPC', tag: 'grpc', url: D.SS_GRPC_URL, protocol: 'Shadowsocks', transport: 'gRPC', pass: D.SS_PASS, serviceName: D.GRPC_SERVICE_SS, port: '443', tls: 'tls' },
+            { name: 'VMess · gRPC', tag: 'grpc', url: D.VMESS_GRPC_URL, protocol: 'VMess', transport: 'gRPC', uuid: D.UUID_VMESS, serviceName: D.GRPC_SERVICE_VMESS, port: '443', tls: 'tls' },
         ],
         hu: [
-            {name:'Gayroxy · VLESS · HTTPUpgrade', url: '$VLESS_HU_URL', details:{UUID:'$UUID_VLESS', Path:'$PATH_VLESS_HU'}},
-            {name:'Gayroxy · Trojan · HTTPUpgrade', url: '$TROJAN_HU_URL', details:{Password:'$TROJAN_PASS', Path:'$PATH_TROJAN_HU'}},
-            {name:'Gayroxy · VMess · HTTPUpgrade', url: '$VMESS_HU_URL', details:{UUID:'$UUID_VMESS', Path:'$PATH_VMESS_HU'}},
+            { name: 'VLESS · HTTPUpgrade', tag: 'hu', url: D.VLESS_HU_URL, protocol: 'VLESS', transport: 'HTTPUpgrade', uuid: D.UUID_VLESS, path: D.PATH_VLESS_HU, port: '443', tls: 'tls' },
+            { name: 'Trojan · HTTPUpgrade', tag: 'hu', url: D.TROJAN_HU_URL, protocol: 'Trojan', transport: 'HTTPUpgrade', pass: D.TROJAN_PASS, path: D.PATH_TROJAN_HU, port: '443', tls: 'tls' },
+            { name: 'VMess · HTTPUpgrade', tag: 'hu', url: D.VMESS_HU_URL, protocol: 'VMess', transport: 'HTTPUpgrade', uuid: D.UUID_VMESS, path: D.PATH_VMESS_HU, port: '443', tls: 'tls' },
         ],
         local: [
-            {name:'Gayroxy · Shadowsocks', url: '$SS_URL', details:{Method:'aes-256-gcm', Password:'$SS_PASS', Port:'$PORT_SHADOWSOCKS', Server:'127.0.0.1'}},
-            {name:'Gayroxy · SOCKS5', url: '$SOCKS5_URL', details:{Port:'$PORT_SOCKS5', Server:'127.0.0.1'}},
-            {name:'Gayroxy · HTTP Proxy', url: '$HTTP_URL', details:{Port:'$PORT_HTTP_PROXY', Server:'127.0.0.1'}},
+            { name: 'Shadowsocks · Direct', tag: 'local', url: D.SS_URL, protocol: 'Shadowsocks', transport: 'Direct', pass: D.SS_PASS, port: D.PORT_SHADOWSOCKS },
+            { name: 'VLESS · Reality', tag: 'local', url: D.REALITY_LOCAL_URL, protocol: 'VLESS', transport: 'Reality', uuid: D.UUID_REALITY, pbk: D.REALITY_PUBLIC, port: D.PORT_REALITY, sni: 'www.cloudflare.com' },
+            { name: 'SOCKS5 · Local', tag: 'local', url: D.SOCKS5_URL, protocol: 'SOCKS5', transport: 'WebSocket', port: D.PORT_SOCKS5 },
+            { name: 'HTTP · Local', tag: 'local', url: D.HTTP_URL, protocol: 'HTTP', transport: 'WebSocket', port: D.PORT_HTTP_PROXY },
         ]
-    }
-};
+    };
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = event.target;
-        if (!btn) return;
-        const old = btn.textContent;
-        btn.textContent = '✓ Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 1500);
-    });
-}
+    // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function copySubB64() { copyToClipboard(DATA.subB64); }
-
-function showTab(ev, id) {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    ev.currentTarget.classList.add('active');
-    document.getElementById('sec-' + id).classList.add('active');
-}
-
-// ─── Modal ─────────────────────────────────────────────────────────────────
-let modalItem = null;
-
-function openModal(item) {
-    modalItem = item;
-    document.getElementById('modal-title').textContent = item.name;
-    document.getElementById('modal-link').textContent = item.url;
-
-    // Details
-    const detEl = document.getElementById('modal-details');
-    detEl.innerHTML = Object.entries(item.details)
-        .map(([k,v]) => '<div class="row"><span class="key">'+k+'</span><span class="val">'+v+'</span></div>')
-        .join('');
-
-    // QR code
-    const qrEl = document.getElementById('modal-qr');
-    qrEl.innerHTML = '';
-    try { new QRCode(qrEl, {text: item.url, width:280, height:280}); } catch(e) {}
-
-    document.getElementById('modal-overlay').classList.add('open');
-}
-
-function closeModal() {
-    document.getElementById('modal-overlay').classList.remove('open');
-}
-
-function copyFromModal() {
-    if (modalItem) copyToClipboard(modalItem.url);
-}
-
-// ─── Render Cards ──────────────────────────────────────────────────────────
-function getBadgeClass(group) {
-    const map = {ws:'ws', grpc:'grpc', hu:'hu', direct:'direct', local:'local'};
-    return map[group] || 'ws';
-}
-
-function renderCards() {
-    for (const [group, items] of Object.entries(DATA.links)) {
-        const grid = document.getElementById(group + '-grid');
-        if (!grid) continue;
-
-        // Update section header count
-        const countEl = document.getElementById(group + '-count');
-        if (countEl) countEl.textContent = items.length + ' protocol' + (items.length > 1 ? 's' : '');
-
-        items.forEach((item, idx) => {
-            const div = document.createElement('div');
-            div.className = 'card';
-            div.innerHTML = `
-                <h3><span class="proto-name">${item.name}</span> <span class="badge ${getBadgeClass(group)}">${group.toUpperCase()}</span></h3>
-                <div class="details"><span class="label">Share Link</span>${item.url}</div>
-                <div class="details"><span class="label">Details</span>${Object.entries(item.details).map(([k,v]) => '<div><b>'+k+':</b> '+v+'</div>').join('')}</div>
-                <div class="qr-container" id="qr-${group}-${idx}"><span style="font-size:12px;color:#666;">Loading QR...</span></div>
-                <div class="card-actions">
-                    <button class="copy-btn" onclick="copyToClipboard('${item.url.replace(/'/g,"\\'")}')">📋 Copy</button>
-                    <button class="modal-btn" onclick="openModal(DATA.links['${group}'][${idx}])">🔍 Details</button>
-                </div>
-            `;
-            grid.appendChild(div);
-
-            // Render QR
-            setTimeout(() => {
-                const qrTarget = document.getElementById('qr-'+group+'-'+idx);
-                if (qrTarget) {
-                    qrTarget.innerHTML = '';
-                    try { new QRCode(qrTarget, {text: item.url, width:160, height:160}); } catch(e) { qrTarget.innerHTML = ''; }
-                }
-            }, 300 + idx * 30);
+    function copyToClipboard(text, btn) {
+        navigator.clipboard.writeText(text).then(() => {
+            const orig = btn.textContent;
+            btn.textContent = '✓ Copied!';
+            btn.style.background = 'linear-gradient(135deg, #00b894, #00d4aa)';
+            setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 1500);
+        }).catch(() => {
+            // fallback
+            const ta = document.createElement('textarea');
+            ta.value = text; document.body.appendChild(ta); ta.select();
+            document.execCommand('copy'); document.body.removeChild(ta);
         });
     }
-}
 
-// ─── Subscription QR ──────────────────────────────────────────────────────
-setTimeout(() => {
-    try { new QRCode(document.getElementById('sub-qr'), {text: 'https://'+DATA.domain+'/sub', width:160, height:160}); } catch(e) {}
-}, 200);
-
-// ─── Programs ─────────────────────────────────────────────────────────────
-function buildPrograms() {
-    const pc = document.getElementById('program-content');
-    const allWS = DATA.links.ws || [];
-    const allGRPC = DATA.links.grpc || [];
-    const allHU = DATA.links.hu || [];
-    const allHTTP = [...allWS, ...allGRPC, ...allHU];
-
-    const programs = {
-        'NekoBox / Nekoray': () => [allWS[0], allWS[1], allGRPC[0], allGRPC[1]],
-        'V2RayNG / V2RayN': () => [allWS[0], allWS[2], allGRPC[0], allGRPC[3]],
-        'Shadowrocket': () => allHTTP,
-        'Streisand / FairVPN': () => [allWS[0], allWS[1]],
-        'v2rayN / Qv2ray': () => [allWS[0], allWS[2], allGRPC[1], allGRPC[2], allGRPC[3]],
-        'Sing-Box / SFI': () => [...allHU, ...allGRPC],
-    };
-    for (const [name, getLinks] of Object.entries(programs)) {
-        const links = getLinks().filter(Boolean);
-        if (!links.length) continue;
-        const div = document.createElement('div');
-        div.className = 'program-section';
-        div.innerHTML = '<h4>📱 ' + name + '</h4><ul class="url-list">' +
-            links.map(l => '<li><b>' + l.name + ':</b> <a href="' + l.url + '">' + l.url + '</a></li>').join('') +
-            '</ul>';
-        pc.appendChild(div);
+    function showToast(msg) {
+        const old = document.querySelector('.toast');
+        if (old) old.remove();
+        const t = document.createElement('div');
+        t.className = 'toast'; t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 2000);
     }
-}
 
-// ─── Init ──────────────────────────────────────────────────────────────────
-renderCards();
-buildPrograms();
+    // ─── Tab Switching ─────────────────────────────────────────────────────────
+
+    function switchTab(name) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+        const tabEls = document.querySelectorAll('.tab');
+        const idx = ['http', 'local', 'programs'].indexOf(name);
+        if (tabEls[idx]) tabEls[idx].classList.add('active');
+        const section = document.getElementById('tab-' + name);
+        if (section) section.classList.add('active');
+    }
+
+    // ─── Render Cards ──────────────────────────────────────────────────────────
+
+    function renderCard(item, idx, group) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const tagClass = 'tag-' + (item.tag === 'ws' ? 'ws' : item.tag === 'grpc' ? 'grpc' : item.tag === 'hu' ? 'hu' : 'local');
+        card.innerHTML = `
+            <h3>🏳️‍🌈 Gayroxy · ${item.name}</h3>
+            <span class="protocol-tag ${tagClass}">${item.transport}</span>
+            <div class="url-preview">${item.url}</div>
+            <div class="actions">
+                <button class="btn primary" onclick="copyToClipboard('${item.url.replace(/'/g, "\\'")}', this)">📋 Copy</button>
+                <button class="btn outline" onclick="openModal(${idx}, '${group}')">🔍 Details</button>
+            </div>
+        `;
+        return card;
+    }
+
+    function renderSection(containerId, items, group, title, icon) {
+        const container = document.getElementById(containerId);
+        if (!container || !items.length) return;
+        const section = document.createElement('div');
+        section.innerHTML = `<div class="section-header">${icon} ${title} <span class="count">${items.length}</span></div>`;
+        const grid = document.createElement('div');
+        grid.className = 'grid';
+        items.forEach((item, idx) => grid.appendChild(renderCard(item, idx, group)));
+        section.appendChild(grid);
+        container.appendChild(section);
+    }
+
+    function renderCards() {
+        renderSection('cards-ws', DATA.ws, 'ws', 'WebSocket', '📡');
+        renderSection('cards-grpc', DATA.grpc, 'grpc', 'gRPC', '🔗');
+        renderSection('cards-hu', DATA.hu, 'hu', 'HTTPUpgrade', '⬆️');
+        renderSection('cards-local', DATA.local, 'local', 'Direct Connection', '🔌');
+
+        // subscription QR
+        const subUrl = document.getElementById('sub-url');
+        if (subUrl && typeof QRCode !== 'undefined') {
+            new QRCode(document.getElementById('sub-qr'), {
+                text: subUrl.textContent.trim(),
+                width: 140, height: 140,
+                colorDark: '#00d4aa', colorLight: '#ffffff'
+            });
+        }
+    }
+
+    // ─── Modal ─────────────────────────────────────────────────────────────────
+
+    let modalQR = null;
+
+    function openModal(idx, group) {
+        const items = DATA[group];
+        if (!items || !items[idx]) return;
+        const item = items[idx];
+
+        // Title
+        document.getElementById('modal-title').textContent = '🏳️‍🌈 Gayroxy · ' + item.name;
+        document.getElementById('modal-subtitle').textContent = item.transport + ' via Cloudflare Tunnel';
+
+        // Link
+        document.getElementById('modal-link').textContent = item.url;
+
+        // QR
+        const qrContainer = document.getElementById('modal-qr');
+        qrContainer.innerHTML = '';
+        if (typeof QRCode !== 'undefined') {
+            try {
+                modalQR = new QRCode(qrContainer, {
+                    text: item.url,
+                    width: 260, height: 260,
+                    colorDark: '#00d4aa', colorLight: '#ffffff'
+                });
+            } catch (e) {
+                qrContainer.innerHTML = '<div style="color:var(--text2);padding:20px;">QR unavailable</div>';
+            }
+        } else {
+            qrContainer.innerHTML = '<div style="color:var(--text2);padding:20px;">QR library not loaded</div>';
+        }
+
+        // Details
+        const detailsEl = document.getElementById('modal-details');
+        const rows = [];
+        if (item.protocol) rows.push(['Protocol', item.protocol]);
+        if (item.transport) rows.push(['Transport', item.transport]);
+        if (item.uuid) rows.push(['UUID', item.uuid]);
+        if (item.pass) rows.push(['Password', item.pass]);
+        if (item.path) rows.push(['Path', item.path]);
+        if (item.serviceName) rows.push(['ServiceName', item.serviceName]);
+        if (item.port) rows.push(['Port', item.port]);
+        if (item.tls) rows.push(['TLS', item.tls]);
+        if (item.pbk) rows.push(['Public Key', item.pbk]);
+        if (item.sni) rows.push(['SNI', item.sni]);
+        detailsEl.innerHTML = rows.map(r =>
+            '<div class="detail-row"><span class="detail-label">' + r[0] + '</span><span class="detail-value">' + r[1] + '</span></div>'
+        ).join('');
+
+        // Show
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function closeModal(e) {
+        if (e && e.target !== e.currentTarget) return;
+        document.getElementById('modal-overlay').classList.remove('open');
+    }
+
+    function copyFromModal() {
+        const link = document.getElementById('modal-link').textContent;
+        const btn = document.getElementById('modal-copy-btn');
+        copyToClipboard(link, btn);
+        showToast('✓ Link copied to clipboard');
+    }
+
+    function copySub() {
+        const url = document.getElementById('sub-url').textContent;
+        const btn = document.querySelector('.sub-box .btn');
+        copyToClipboard(url, btn);
+        showToast('✓ Subscription URL copied!');
+    }
+
+    // ─── Build Programs Tab ────────────────────────────────────────────────────
+
+    function buildPrograms() {
+        const pc = document.getElementById('programs-list');
+        if (!pc) return;
+        const allWS = [DATA.ws[0], DATA.ws[1], DATA.ws[2], DATA.ws[3]];
+        const allGRPC = [DATA.grpc[0], DATA.grpc[1], DATA.grpc[2], DATA.grpc[3]];
+        const allHU = [DATA.hu[0], DATA.hu[1], DATA.hu[2]];
+        const allHTTP = [...allWS, ...allGRPC, ...allHU].filter(Boolean);
+        const allLocal = DATA.local;
+        const programs = {
+            'NekoBox / Nekoray': () => [allWS[0], allWS[1], allGRPC[0], allGRPC[1]],
+            'V2RayNG / V2RayN': () => [allWS[0], allWS[2], allGRPC[0], allGRPC[3]],
+            'Shadowrocket': () => allHTTP,
+            'Streisand / FairVPN': () => [allWS[0], allWS[1]],
+            'v2rayN / Qv2ray': () => [allWS[0], allWS[2], allGRPC[1], allGRPC[2], allGRPC[3]],
+            'Sing-Box / SFI': () => [...allHU, ...allGRPC],
+        };
+        for (const [name, getLinks] of Object.entries(programs)) {
+            const links = getLinks().filter(Boolean);
+            if (!links.length) continue;
+            const div = document.createElement('div');
+            div.className = 'program-section';
+            div.innerHTML = '<h4>📱 ' + name + '</h4><ul class="url-list">' +
+                links.map(l => '<li><b>' + l.name + ':</b> <a href="' + l.url + '">' + l.url + '</a></li>').join('') +
+                '</ul>';
+            pc.appendChild(div);
+        }
+    }
+
+    // ─── Init ──────────────────────────────────────────────────────────────────
+    renderCards();
+    buildPrograms();
 </script>
 </body>
 </html>
