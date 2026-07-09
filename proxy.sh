@@ -138,61 +138,67 @@ fi
 if [[ -z "$WARP_BIN" ]]; then
     warn "warp-cli not found — skipping WARP (Reddit stealth unavailable)"
 else
-    # Start the daemon and wait for it to be ready
-    WARP_SVC_OK=$(sudo systemctl start warp-svc 2>&1) && sleep 2 || warn "warp-svc: $WARP_SVC_OK"
-    if pgrep -x warp-svc >/dev/null 2>&1; then
-        log "warp-svc daemon running"
-    else
-        # Try direct launch as fallback
-        sudo warp-svc --daemonize >/dev/null 2>&1 && sleep 2 || true
-        pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running — WARP may fail"
+    # warp-cli communicates with warp-svc via D-Bus — ensure D-Bus is running
+    if ! pgrep -x dbus-daemon >/dev/null 2>&1; then
+        log "Starting D-Bus (required by WARP)..."
+        sudo /etc/init.d/dbus start 2>/dev/null || sudo systemctl start dbus 2>/dev/null || \
+            warn "Failed to start D-Bus"
+        sleep 2
     fi
 
-    # Register device (anonymous, no auth needed). Try new syntax first.
+    # Start warp-svc AFTER D-Bus is up
+    if pgrep -x warp-svc >/dev/null 2>&1; then
+        sudo systemctl restart warp-svc 2>/dev/null || true
+    else
+        sudo systemctl start warp-svc 2>/dev/null || sudo warp-svc --daemonize >/dev/null 2>&1 || true
+    fi
+    sleep 2
+    pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
+
+    # Show available commands for debugging
+    log "Checking warp-cli available commands..."
+    sudo $WARP_BIN --help 2>&1 | head -20
+
+    # Register device (anonymous, no auth). Try new syntax then old.
     WARP_REG=$(sudo $WARP_BIN registration new 2>&1) \
         || WARP_REG=$(sudo $WARP_BIN register 2>&1) \
         || true
-    if echo "$WARP_REG" | grep -qi 'error\|failed\|already'; then
-        # Already registered is fine — just a warning
+    if echo "$WARP_REG" | grep -qi 'error\|failed\|unknown\|unrecognized\|not found'; then
         echo "$WARP_REG" | grep -qi 'already' && log "WARP already registered" \
             || warn "WARP register: $(echo "$WARP_REG" | head -1)"
     else
         log "WARP registered"
     fi
 
-    # Set proxy mode (try new syntax first)
-    sudo $WARP_BIN mode proxy 2>/dev/null || sudo $WARP_BIN set-mode proxy 2>/dev/null || \
+    # Set proxy mode
+    sudo $WARP_BIN mode proxy 2>&1 || sudo $WARP_BIN set-mode proxy 2>&1 || \
         warn "warp-cli set-mode failed"
 
-    # Connect to WARP
-    WARP_CONN=$(sudo $WARP_BIN connect 2>&1) || true
-    echo "$WARP_CONN" | grep -qi 'error' && warn "WARP connect: $WARP_CONN"
+    # Connect
+    sudo $WARP_BIN connect 2>&1 | head -3 || true
     sleep 3
 
     # Verify WARP SOCKS5 proxy is actually routing traffic
     if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
         log "WARP SOCKS5 listening on :40000"
-        for try in 1 2; do
-            WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
-            if echo "$WARP_CHECK" | grep -q 'warp='; then
-                WARP_ACTIVE=true
-                log "WARP ✓ — routing through consumer IPs"
-                break
-            fi
-            sleep 2
-            # Retry: disconnect and reconnect
+        WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
+        if echo "$WARP_CHECK" | grep -q 'warp='; then
+            WARP_ACTIVE=true
+            log "WARP ✓ — routing through consumer IPs"
+        else
+            # Retry once: reconnect
             sudo $WARP_BIN disconnect >/dev/null 2>&1 || true
             sleep 1
             sudo $WARP_BIN connect >/dev/null 2>&1 || true
             sleep 3
-        done
+            WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
+            echo "$WARP_CHECK" | grep -q 'warp=' && WARP_ACTIVE=true && log "WARP ✓ after reconnect" \
+                || warn "WARP SOCKS5 open but not routing traffic"
+        fi
     else
         warn "WARP SOCKS5 port 40000 not found — checking for alternative ports..."
-        ss -tlnp 2>/dev/null | grep -i warp || true
+        ss -tlnp 2>/dev/null | grep -E 'warp|4000[0-9]' || true
     fi
-
-    # Show final WARP status for debugging
-    sudo $WARP_BIN status 2>/dev/null | head -5 || warn "warp-cli status failed"
 
     if [[ "$WARP_ACTIVE" != "true" ]]; then
         warn "WARP not active — Reddit blocking may persist"
