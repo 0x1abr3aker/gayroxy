@@ -145,17 +145,21 @@ else
             warn "Failed to start D-Bus"
         sleep 2
     fi
-
-    # Start warp-svc AFTER D-Bus is up
-    sudo systemctl restart warp-svc 2>/dev/null || sudo systemctl start warp-svc 2>/dev/null || true
-    sleep 2
+    sudo mkdir -p /run/dbus
+    sudo dbus-daemon --system --fork
+    sudo warp-svc --daemonize
+    sleep 4
+    #
+    # # Start warp-svc AFTER D-Bus is up
+    # sudo systemctl restart warp-svc 2>/dev/null || sudo systemctl start warp-svc 2>/dev/null || true
+    # sleep 2
     pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
 
     # ── Register, set proxy mode, and connect ──
     # Docs: https://developers.cloudflare.com/warp-client/get-started/linux/
     sudo $WARP_BIN --accept-tos registration new 2>&1 || true
-    sudo $WARP_BIN mode proxy 2>&1 | head -3 || true
-    sudo $WARP_BIN connect 2>&1 | head -3 || true
+    sudo $WARP_BIN --accept-tos mode proxy 2>&1 | head -3 || true
+    sudo $WARP_BIN --accept-tos connect 2>&1 | head -3 || true
     sleep 3
     log "WARP status:"
     sudo $WARP_BIN status 2>&1 | head -8
