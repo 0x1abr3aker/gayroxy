@@ -5,6 +5,10 @@ on:
     branches: [ master, main ]
   workflow_dispatch:
 
+concurrency:
+  group: proxy-deploy
+  cancel-in-progress: true
+
 permissions:
   actions: write
   contents: read
@@ -17,22 +21,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 🔴 Close other actions
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          echo "::group::Cancelling other runs..."
+          gh run list --workflow "${{ github.workflow }}" --json databaseId,status \
+            --jq '.[] | select(.status != "completed") | .databaseId' \
+            | while read -r id; do
+              [[ "$id" != "${{ github.run_id }}" ]] && gh run cancel "$id" 2>/dev/null || true
+            done
+          echo "Done."
+          echo "::endgroup::"
+
       - name: Make script executable
         run: chmod +x proxy.sh
 
-      - name: Run proxy.sh
+      - name: ▶️ Run proxy
         id: proxy
         env:
           CF_DOMAIN: ${{ secrets.CF_DOMAIN }}
           CF_AUTHTOKEN: ${{ secrets.CF_AUTHTOKEN }}
         run: |
+          mkdir -p logs
           echo "::group::Proxy Output"
-          ./proxy.sh
+          ./proxy.sh 2>&1 | tee logs/run.log
           echo "::endgroup::"
 
-      - name: Re-trigger (keep alive)
+      - name: 📤 Push logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-logs
+          path: |
+            logs/
+            sub/*.html
+            sub/subscription.b64
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 🔄 Re-run (keep alive)
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
+          echo "::group::Re-triggering..."
           gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
+          echo "Re-trigger sent."
+          echo "::endgroup::"
