@@ -480,7 +480,7 @@ d = {k: os.environ.get(k, '') for k in keys}
 print(json.dumps(d))
 ")
 
-    envsubst < templates/panel.html.tmpl > "${SUB_DIR}/panel.html"
+    envsubst '${DATA} ${DOMAIN}' < templates/panel.html.tmpl > "${SUB_DIR}/panel.html"
     log "Panel: https://${DOMAIN}/panel"
 }
 
