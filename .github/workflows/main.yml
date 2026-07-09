@@ -67,9 +67,48 @@ jobs:
           DURATION=$(( $(date +%s) - $(date -d "${{ github.run_started_at }}" +%s) ))
           if [[ $DURATION -lt 30 ]]; then
             echo "Run lasted ${DURATION}s — too short (likely failure). Skipping re-trigger."
-          else
-            echo "::group::Re-triggering..."
-            gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
-            echo "Done."
-            echo "::endgroup::"
+            exit 0
           fi
+
+          echo "::group::Dispatching next run..."
+          gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
+          echo "Sleeping 40s to let the runner pick it up..."
+          sleep 40
+          echo "::endgroup::"
+
+          # Check if the new run is stuck queued (no runner picked it up)
+          echo "::group::Checking queue status..."
+          NEW_RUNS=$(gh run list --workflow "${{ github.workflow }}" --branch "${{ github.ref }}" \
+            --json databaseId,status,createdAt,conclusion,displayTitle --limit 5 2>/dev/null)
+
+          # Find the run created after this one started that is NOT "completed"
+          LATEST=$(echo "$NEW_RUNS" | python3 -c "
+import json, sys
+runs = json.load(sys.stdin)
+cutoff = '${{ github.run_started_at }}'
+new_runs = [r for r in runs if r.get('createdAt','') > cutoff and r.get('status','') != 'completed']
+if not new_runs:
+    sys.exit(0)
+# Pick the newest one
+new_runs.sort(key=lambda r: r.get('createdAt',''))
+nr = new_runs[-1]
+print(f\"{nr['databaseId']}|{nr['status']}\")
+" 2>/dev/null || echo "")
+
+          if [[ -z "$LATEST" ]]; then
+            echo "No new run found yet — dispatching again..."
+            gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
+          else
+            ID="${LATEST%%|*}"
+            STATUS="${LATEST##*|}"
+            echo "New run #$ID status: $STATUS"
+            if [[ "$STATUS" == "queued" || "$STATUS" == "pending" || "$STATUS" == "waiting" ]]; then
+              echo "Run #$ID stuck in '$STATUS' — cancelling and re-dispatching..."
+              gh run cancel "$ID" 2>/dev/null || true
+              sleep 2
+              gh workflow run "${{ github.workflow }}" --ref "${{ github.ref }}" 2>/dev/null || true
+            else
+              echo "Run #$ID is $STATUS — looks good!"
+            fi
+          fi
+          echo "::endgroup::"
