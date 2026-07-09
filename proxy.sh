@@ -160,7 +160,7 @@ install_cloudflared() {
 
 setup_warp() {
     WARP_ACTIVE=false
-    local WARP_BIN=""
+    WARP_BIN=""
 
     if command -v warp-cli &>/dev/null; then
         WARP_BIN=$(command -v warp-cli)
@@ -176,40 +176,44 @@ setup_warp() {
     fi
 
     if [[ -z "$WARP_BIN" ]]; then
-        warn "warp-cli not found — Reddit stealth unavailable"
-        return
-    fi
+        warn "warp-cli not found — skipping WARP (Reddit stealth unavailable)"
+    else
+        # warp-svc is started by the package's postinst — just ensure D-Bus is up
+        if ! pgrep -x dbus-daemon >/dev/null 2>&1; then
+            sudo /etc/init.d/dbus start 2>/dev/null || sudo systemctl start dbus 2>/dev/null || true
+            sleep 1
+        fi
 
-    # Ensure D-Bus is running (warp-cli talks to warp-svc via D-Bus)
-    if ! pgrep -x dbus-daemon >/dev/null 2>&1; then
-        sudo /etc/init.d/dbus start 2>/dev/null || sudo systemctl start dbus 2>/dev/null || true
-        sleep 1
-    fi
+        # Wait for daemon socket to be ready
+        for i in 1 2 3 4 5; do
+            ss -xl 2>/dev/null | grep -q warp_service && break
+            sleep 1
+        done
+        pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
 
-    # Wait for daemon socket
-    for i in 1 2 3 4 5; do
-        ss -xl 2>/dev/null | grep -q warp_service && break
-        sleep 1
-    done
+        # Register (idempotent), set SOCKS5 proxy mode, connect
+        sudo $WARP_BIN --accept-tos registration new 2>&1 || true
+        sudo $WARP_BIN --accept-tos mode proxy 2>&1 || true
+        sudo $WARP_BIN --accept-tos connect 2>&1 || true
+        sleep 3
 
-    if ! pgrep -x warp-svc >/dev/null 2>&1; then
-        warn "warp-svc not running — Reddit stealth unavailable"
-        return
-    fi
+        # Check status
+        sudo warp-cli --accept-tos status | grep -qi "Connected" && echo "up" || echo "down"
 
-    # Register, set proxy mode, connect
-    sudo $WARP_BIN --accept-tos registration new 2>/dev/null || true
-    sudo $WARP_BIN --accept-tos mode proxy 2>/dev/null || true
-    sudo $WARP_BIN --accept-tos connect 2>/dev/null || true
-    sleep 3
+        # Probe SOCKS5
+        if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
+            log "WARP SOCKS5 listening on :40000"
+            WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
+            if echo "$WARP_CHECK" | grep -q 'warp='; then
+                WARP_ACTIVE=true
+                log "WARP ✓ — routing through consumer IPs"
+            fi
+        else
+            warn "WARP SOCKS5 not listening on :40000"
+        fi
 
-    # Probe SOCKS5
-    if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
-        local CHECK
-        CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
-        if echo "$CHECK" | grep -q 'warp='; then
-            WARP_ACTIVE=true
-            log "WARP ✓ — routing via consumer IPs"
+        if [[ "$WARP_ACTIVE" != "true" ]]; then
+            warn "WARP not active — Reddit blocking may persist"
         fi
     fi
 }
