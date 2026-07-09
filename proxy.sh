@@ -138,35 +138,29 @@ fi
 if [[ -z "$WARP_BIN" ]]; then
     warn "warp-cli not found — skipping WARP (Reddit stealth unavailable)"
 else
-    # Ensure D-Bus is running (warp-cli talks to warp-svc via D-Bus)
+    # warp-svc is started by the package's postinst — just ensure D-Bus is up
     if ! pgrep -x dbus-daemon >/dev/null 2>&1; then
-        log "Starting D-Bus (required by WARP)..."
-        sudo /etc/init.d/dbus start 2>/dev/null || sudo systemctl start dbus 2>/dev/null || \
-            warn "Failed to start D-Bus"
-        sleep 2
+        sudo /etc/init.d/dbus start 2>/dev/null || sudo systemctl start dbus 2>/dev/null || true
+        sleep 1
     fi
-    sudo mkdir -p /run/dbus
-    sudo dbus-daemon --system --fork
-    sudo warp-svc --daemonize
-    sleep 4
-    #
-    # # Start warp-svc AFTER D-Bus is up
-    # sudo systemctl restart warp-svc 2>/dev/null || sudo systemctl start warp-svc 2>/dev/null || true
-    # sleep 2
+
+    # Wait for daemon socket to be ready
+    for i in 1 2 3 4 5; do
+        ss -xl 2>/dev/null | grep -q warp_service && break
+        sleep 1
+    done
     pgrep -x warp-svc >/dev/null 2>&1 || warn "warp-svc daemon not running"
 
-    # ── Register, set proxy mode, and connect ──
-    # Docs: https://developers.cloudflare.com/warp-client/get-started/linux/
+    # Register (idempotent), set SOCKS5 proxy mode, connect
     sudo $WARP_BIN --accept-tos registration new 2>&1 || true
-    sudo $WARP_BIN --accept-tos mode proxy 2>&1 | head -3 || true
-    sudo $WARP_BIN --accept-tos connect 2>&1 | head -3 || true
+    sudo $WARP_BIN --accept-tos mode proxy 2>&1 || true
+    sudo $WARP_BIN --accept-tos connect 2>&1 || true
     sleep 3
-    log "WARP status:"
-    sudo $WARP_BIN status 2>&1 | head -8
-    log "=== looking for SOCKS5 port ==="
-    ss -tlnp 2>/dev/null | grep -E '4000[0-9]' || echo "(none found)"
 
-    # If we got here and have a SOCKS5 port, try the traffic probe
+    # Check status
+    sudo $WARP_BIN status 2>&1 | head -8
+
+    # Probe SOCKS5
     if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
         log "WARP SOCKS5 listening on :40000"
         WARP_CHECK=$(curl -s --max-time 5 --socks5 127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null)
@@ -174,6 +168,8 @@ else
             WARP_ACTIVE=true
             log "WARP ✓ — routing through consumer IPs"
         fi
+    else
+        warn "WARP SOCKS5 not listening on :40000"
     fi
 
     if [[ "$WARP_ACTIVE" != "true" ]]; then
