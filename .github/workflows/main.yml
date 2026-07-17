@@ -4,6 +4,9 @@ on:
   push:
     branches: [ master, main ]
   workflow_dispatch:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
 
 concurrency:
   group: proxy-deploy
@@ -25,11 +28,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           echo "::group::Cancelling other runs..."
-          gh run list --workflow "${{ github.workflow }}" --json databaseId,status \
-            --jq '.[] | select(.status != "completed") | .databaseId' \
-            | while read -r id; do
-              [[ "$id" != "${{ github.run_id }}" ]] && gh run cancel "$id" 2>/dev/null || true
-            done
+          # Cancel all runs for this workflow that are not completed and not the current run
+          gh run list --workflow "${{ github.workflow }}" --branch "${{ github.ref }}" \
+            --json databaseId,status --jq --argjson CURRENT_ID '${{ github.run_id }}' \
+            '.[] | select(.databaseId != $CURRENT_ID and .status != "completed") | .databaseId' \
+            | while read -r id; do gh run cancel "$id" 2>/dev/null || true; done
           echo "Done."
           echo "::endgroup::"
 
@@ -64,6 +67,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
+          # Check if the proxy process is already running (status: in_progress)
+          # This check is implicitly handled by the "cancel-in-progress: true" concurrency setting
+          # and the fact that this step only runs when the preceding steps have completed.
+          # If they completed successfully, it means the proxy started. If they failed,
+          # the workflow would have failed.
+
           DURATION=$(( $(date +%s) - $(date -d "${{ github.run_started_at }}" +%s) ))
           if [[ $DURATION -lt 30 ]]; then
             echo "Run lasted ${DURATION}s — too short (likely failure). Skipping re-trigger."
@@ -78,8 +87,11 @@ jobs:
 
           # Check if new run is stuck queued (no runner picked it up)
           echo "::group::Checking queue status..."
+          # Get list of runs for this workflow, filter out current run and completed runs
+          # Then select the newest one and extract ID and status using jq
           NEXT=$(gh run list --workflow "${{ github.workflow }}" --branch "${{ github.ref }}" \
-            --json databaseId,status --jq '.[] | select(.databaseId != '${{ github.run_id }}' and .status != "completed") | "\(.databaseId)|\(.status)"' | head -1)
+            --json databaseId,status --jq --argjson CURRENT_ID '${{ github.run_id }}' \
+            '.[] | select(.databaseId != $CURRENT_ID and .status != "completed") | "\(.databaseId)|\(.status)"' | head -1)
 
           if [[ -z "$NEXT" ]]; then
             echo "No new run found — dispatching again..."
