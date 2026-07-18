@@ -155,10 +155,22 @@ else
     sudo $WARP_BIN --accept-tos registration new 2>&1 || true
     sudo $WARP_BIN --accept-tos mode proxy 2>&1 || true
     sudo $WARP_BIN --accept-tos connect 2>&1 || true
-    sleep 3
+    sleep 2
 
-    # Check status
-    sudo warp-cli --accept-tos status | grep -qi "Connected" && echo "up" || echo "down"
+    # Retry status check — WARP can take several seconds to connect
+    WARP_CONNECTED=false
+    for i in 1 2 3 4 5 6; do
+        if sudo warp-cli --accept-tos status 2>/dev/null | grep -qi "Connected"; then
+            echo "up"
+            WARP_CONNECTED=true
+            break
+        fi
+        sleep 2
+    done
+    if [[ "$WARP_CONNECTED" != "true" ]]; then
+        echo "down"
+        sudo warp-cli --accept-tos status 2>/dev/null || true
+    fi
 
     # Probe SOCKS5
     if ss -tlnp 2>/dev/null | grep -q ':40000 '; then
